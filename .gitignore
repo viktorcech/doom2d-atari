@@ -26,6 +26,11 @@ __pycache__/
 # Claude Code local settings
 .claude/
 
+# Documentation / internal notes
+CLAUDE.md
+*.md
+!README.md
+
 # Preview PNGs in converted
 converted/*_preview.png
 converted/*_vis.png
