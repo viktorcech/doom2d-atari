@@ -76,6 +76,8 @@ mapedit/        Map editor (Python/Tkinter)
 
 Inspired by [Doom 2D](https://doom2d.org/) by Prikol Software and the original [Doom](https://en.wikipedia.org/wiki/Doom_(1993_video_game)) by id Software.
 
+Huge thanks to [Altirra](https://virtualdub.org/altirra.html) by Avery Lee — its debugger and hardware reference documentation were invaluable for understanding VBXE, POKEY, and Atari internals.
+
 ## License
 
 This project is for educational and hobbyist purposes.
