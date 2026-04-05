@@ -72,6 +72,10 @@ mapedit/        Map editor (Python/Tkinter)
 
 - Scrolling and parallax background need rework — current implementation has issues with VBXE pitch alignment and vertical fine-scroll (4px steps instead of per-pixel)
 
+## Credits
+
+Inspired by [Doom 2D](https://doom2d.org/) by Prikol Software and the original [Doom](https://en.wikipedia.org/wiki/Doom_(1993_video_game)) by id Software.
+
 ## License
 
 This project is for educational and hobbyist purposes.
