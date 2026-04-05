@@ -68,6 +68,10 @@ mapedit/        Map editor (Python/Tkinter)
 | $9000-$9FFF | MEMAC-A window (VBXE VRAM access) |
 | VBXE VRAM (512 KB) | Screen buffers, sprites, sky, tiles, sounds, HUD font |
 
+## Known Issues / TODO
+
+- Scrolling and parallax background need rework — current implementation has issues with VBXE pitch alignment and vertical fine-scroll (4px steps instead of per-pixel)
+
 ## License
 
 This project is for educational and hobbyist purposes.
