@@ -14,6 +14,7 @@ A 2D side-scrolling action game inspired by Doom, written entirely in 6502 assem
 - 21 pickup types (health, armor, weapons, ammo, keys)
 - Explosive barrels with chain reactions
 - Doors with colored key locks and auto-close
+- Wall switches that trigger doors and events
 - Digital sound effects via POKEY Timer 1 IRQ (~3995 Hz sample playback)
 - Title screen and pause menu
 - Map editor (Python/Tkinter)
