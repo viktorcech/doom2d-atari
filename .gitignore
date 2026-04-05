@@ -1,0 +1,32 @@
+# Build output
+bin/
+
+# Assembler binary
+mads.exe
+
+# Original WAD
+DOOM.WAD
+
+# Extracted/unused assets
+extracted/
+_nepouzivat/
+
+# Working images
+*.png
+
+# Editor config
+mapedit.cfg
+
+# Notes
+poznamky.txt
+
+# Python cache
+__pycache__/
+
+# Claude Code local settings
+.claude/
+
+# Preview PNGs in converted
+converted/*_preview.png
+converted/*_vis.png
+converted/*_cmp.png

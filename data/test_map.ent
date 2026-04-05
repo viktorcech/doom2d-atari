@@ -1,0 +1,18 @@
+; Auto-generated entity data from map
+; Source: map1.map
+; Entities: 14
+
+caco       col= 10 row=  3  px=(160,48) dir=R
+plasmagun  col= 16 row=  3  px=(256,48) dir=R
+shotgun    col= 17 row=  3  px=(272,48) dir=L
+keyyellow  col= 18 row=  3  px=(288,48) dir=R
+pinky      col=  4 row=  4  px=(64,64) dir=L
+barrel     col=  2 row=  7  px=(32,112) dir=R
+keyblue    col=  3 row=  7  px=(48,112) dir=R
+rocketpk   col=  4 row=  7  px=(64,112) dir=R
+health     col=  5 row=  7  px=(80,112) dir=R
+shotgun    col= 12 row=  7  px=(192,112) dir=L
+player     col=  2 row= 10  px=(32,160) dir=R
+zombie     col=  8 row= 10  px=(128,160) dir=L
+imp        col= 10 row= 10  px=(160,160) dir=R
+health     col= 16 row= 10  px=(256,160) dir=R
