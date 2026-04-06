@@ -1,76 +1,116 @@
 ; Auto-generated entity spawn data
-; Source: fff.map
+; Source: map1.map
 
-SPAWN_X = 64
+SPAWN_X = 16
 SPAWN_Y = 160
 
-NUM_ENEMIES = 1
+NUM_ENEMIES = 6
 
 enemy_spawn_x
-        dta a(176)  ; zombie
+        dta a(160)  ; caco
+        dta a(272)  ; shotgun
+        dta a(64)  ; pinky
+        dta a(192)  ; shotgun
+        dta a(128)  ; zombie
+        dta a(160)  ; imp
 
 enemy_spawn_y
+        dta 48  ; caco
+        dta 48  ; shotgun
+        dta 64  ; pinky
+        dta 112  ; shotgun
         dta 160  ; zombie
+        dta 160  ; imp
 
 enemy_spawn_type
+        dta 3  ; caco
+        dta 4  ; shotgun
+        dta 2  ; pinky
+        dta 4  ; shotgun
         dta 0  ; zombie
+        dta 1  ; imp
 
 enemy_spawn_dir
+        dta 0  ; caco right
+        dta 1  ; shotgun left
+        dta 1  ; pinky left
+        dta 1  ; shotgun left
         dta 1  ; zombie left
+        dta 0  ; imp right
 
-NUM_PICKUPS = 0
+NUM_PICKUPS = 6
 
 pickup_spawn_x
-        dta 0  ; placeholder
+        dta 0  ; plasmagun
+        dta 32  ; keyyellow
+        dta 48  ; keyblue
+        dta 64  ; rocketpk
+        dta 80  ; health
+        dta 0  ; health
 
 pickup_spawn_xhi
-        dta 0  ; placeholder
+        dta 1  ; plasmagun
+        dta 1  ; keyyellow
+        dta 0  ; keyblue
+        dta 0  ; rocketpk
+        dta 0  ; health
+        dta 1  ; health
 
 pickup_spawn_y
-        dta 0  ; placeholder
+        dta 48  ; plasmagun
+        dta 48  ; keyyellow
+        dta 112  ; keyblue
+        dta 112  ; rocketpk
+        dta 112  ; health
+        dta 160  ; health
 
 pickup_spawn_type
-        dta 0  ; placeholder
+        dta 15  ; plasmagun
+        dta 8  ; keyyellow
+        dta 7  ; keyblue
+        dta 13  ; rocketpk
+        dta 0  ; health
+        dta 0  ; health
 
-NUM_DECOR = 0
+NUM_DECOR = 1
 
 decor_spawn_x
-        dta 0  ; placeholder
+        dta 32  ; barrel
 
 decor_spawn_xhi
-        dta 0  ; placeholder
+        dta 0  ; barrel
 
 decor_spawn_y
-        dta 0  ; placeholder
+        dta 112  ; barrel
 
 decor_spawn_type
-        dta 0  ; placeholder
+        dta 0  ; barrel
 
 ; Switch target links (auto-generated)
 num_switches
-        dta 1
+        dta 3
 sw_col
-        dta 5  ; switch 0
-        dta 0
-        dta 0
+        dta 18  ; switch 0
+        dta 18  ; switch 1
+        dta 10  ; switch 2
         dta 0
 sw_row
-        dta 10  ; switch 0
-        dta 0
-        dta 0
+        dta 3  ; switch 0
+        dta 10  ; switch 1
+        dta 7  ; switch 2
         dta 0
 sw_tgt_col
-        dta 11  ; -> wall
-        dta 0
-        dta 0
+        dta 11  ; -> door_lock
+        dta 9  ; -> door
+        dta 9  ; -> floor
         dta 0
 sw_tgt_row
-        dta 10  ; -> wall
-        dta 0
-        dta 0
+        dta 3  ; -> door_lock
+        dta 7  ; -> door
+        dta 7  ; -> floor
         dta 0
 sw_action
-        dta 1  ; wall
-        dta 0
-        dta 0
+        dta 3  ; door_lock
+        dta 0  ; door
+        dta 4  ; floor
         dta 0
