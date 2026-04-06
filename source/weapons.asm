@@ -109,19 +109,7 @@ key_to_weap_id
         lda CH
         cmp #$FF
         beq ?done               ; no key pressed
-        ; F key ($38) = toggle FPS counter
-        cmp #$38
-        bne ?not_f
-        lda #$FF
-        sta CH
-        lda fps_show
-        eor #1
-        sta fps_show
-        bne ?done               ; turned on, no clear needed
-        lda #2
-        sta fps_clear           ; clear both buffers
-        rts
-?not_f  ; SPACE ($21) = USE key (open doors)
+        ; SPACE ($21) = USE key (open doors)
         cmp #$21
         bne ?not_space
         lda #$FF

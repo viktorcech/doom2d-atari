@@ -9,10 +9,7 @@
 .proc init_game
         lda #0
         sta zfr
-        sta fps_count
         sta level_complete
-        lda RTCLOK3
-        sta fps_rtclk
         jsr init_player
         jsr init_enemies
         jsr init_pickups

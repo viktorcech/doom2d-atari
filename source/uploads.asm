@@ -4,51 +4,60 @@
 ;==============================================
 
 ;==============================================
-; GENERIC CHUNK UPLOAD
-; Params: zsrc=source, uc_bank=start bank, uc_cnt=bank count, uc_lastpg=pages in last bank
+; GENERIC CHUNK UPLOAD — Copy data from RAM to VBXE VRAM
+;
+; Copies data through the MEMAC-A window ($9000-$9FFF, 4KB per bank).
+; Each bank maps a 4KB slice of VRAM. Multi-bank uploads are supported.
+;
+; Params:
+;   zsrc      = 16-bit source pointer in RAM (e.g. $6000)
+;   uc_bank   = VBXE bank number (BANK_EN + bank, e.g. $9E for VRAM $01E000)
+;   uc_cnt    = number of 4KB banks to upload (1 = single bank)
+;   uc_lastpg = pages (256B each) in the LAST bank (max 16 = full 4KB)
+;
+; During upload, OS ROM is disabled ($D301) and POKEY IRQs are masked
+; to prevent interference with the MEMAC-A window.
 ;==============================================
 .proc generic_upload
-        lda #$90+MC_CPU
+        lda #$90+MC_CPU         ; MEMAC-A: 4KB window at $9000, CPU access
         sta VBXE_MEMAC_CTRL
         lda #0
-        sta $D40E
+        sta $D40E               ; disable POKEY IRQ during upload
         lda $D301
-        and #$FC
+        and #$FC                ; disable OS ROM (expose RAM under $C000-$FFFF)
         sta $D301
 
 ?nxbank lda uc_bank
-        sta VBXE_BANK_SEL
-        lda #>MEMW
-        sta ?wr+2
-        ldx #16             ; default: full 16 pages per bank
+        sta VBXE_BANK_SEL      ; select VRAM bank → $9000 maps to VRAM
+        lda #>MEMW              ; reset write pointer to $9000
+        sta ?wr+2               ; self-modifying: patch STA address hi byte
+        ldx #16                 ; default: 16 pages (4KB) per bank
         lda uc_cnt
         cmp #1
         bne ?full
-        ldx uc_lastpg       ; last bank may be partial
+        ldx uc_lastpg           ; last bank: only upload partial pages
 ?full
-?page   ldy #0
-?lp     lda (zsrc),y
-?wr     sta MEMW,y
+?page   ldy #0                  ; copy 256 bytes (one page)
+?lp     lda (zsrc),y            ; read from RAM
+?wr     sta MEMW,y              ; write to VRAM via MEMAC window
         iny
         bne ?lp
-        inc zsrc+1
-        inc ?wr+2
+        inc zsrc+1              ; advance source by 256
+        inc ?wr+2               ; advance dest by 256 (within $9000-$9FFF)
         dex
         bne ?page
-        inc uc_bank
+        inc uc_bank             ; next VRAM bank
         dec uc_cnt
         bne ?nxbank
 
-        ; Disable MEMAC bank before returning
-        ; (prevents XEX loader from writing to VRAM when loading next segment)
-        lda #0
-        sta VBXE_BANK_SEL
+        lda #0                  ; disable MEMAC bank mapping
+        sta VBXE_BANK_SEL      ; (prevents XEX loader writing to VRAM)
 
         lda $D301
-        ora #$03
+        ora #$03                ; re-enable OS ROM
         sta $D301
         lda #$40
-        sta $D40E
+        sta $D40E               ; re-enable POKEY IRQ
         rts
 .endp
 uc_bank   dta 0

@@ -4,9 +4,23 @@
 ;==============================================
 
 ; ============================================
-; XDL
+; SETUP XDL + BLITTER DEFAULTS
+; Writes the eXtended Display List to VRAM and pre-fills
+; constant BCB (Blitter Control Block) fields used by all blits.
+;
+; VBXE BCB register map (21 bytes at VRAM_BCB):
+;   0-2:   src address (lo, mid, hi) — 24-bit VRAM source
+;   3-5:   src step (lo, hi, mode)   — bytes per row in source
+;   6-8:   dst address (lo, mid, hi) — 24-bit VRAM destination
+;   9-11:  dst step (lo, hi, mode)   — bytes per row in dest
+;   12-13: width-1 (lo, hi)          — blit width in pixels
+;   14:    height-1                   — blit height in pixels
+;   15:    AND mask ($FF=copy, $00=fill constant)
+;   16-19: XOR bytes (usually 0)
+;   20:    mode (0=opaque, BLT_TRANS=skip color 0)
 ; ============================================
 .proc setup_xdl
+        ; Copy XDL template into VRAM
         lda #BANK_EN+BANK_XDL
         sta VBXE_BANK_SEL
         ldx #xdl_len-1
@@ -14,7 +28,8 @@
         sta MEMW+[VRAM_XDL&$FFF],x
         dex
         bpl ?lp
-        ; Pre-fill constant BCB fields (never change during gameplay)
+        ; Pre-fill BCB fields that stay constant during gameplay:
+        ; dst step = 320 (screen width), AND=$FF, XOR=0
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         lda #<SCR_W
@@ -22,9 +37,9 @@
         lda #>SCR_W
         sta MEMW+[VRAM_BCB&$FFF]+10     ; dst step hi
         lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+11     ; dst step mode
+        sta MEMW+[VRAM_BCB&$FFF]+11     ; dst step mode (1=use explicit step)
         lda #$FF
-        sta MEMW+[VRAM_BCB&$FFF]+15     ; AND mask
+        sta MEMW+[VRAM_BCB&$FFF]+15     ; AND mask ($FF = copy source)
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+16     ; XOR lo
         sta MEMW+[VRAM_BCB&$FFF]+17     ; XOR hi
@@ -33,12 +48,15 @@
         rts
 .endp
 
+; XDL template: 2 entries
+; Entry 1: 20 empty scanlines (border), no overlay
+; Entry 2: 200 scanlines with 320px 8bpp overlay from VRAM $010040
 xdl_data
-        dta $24,$00,19
-        dta $62,$88,199
-        dta $00,$00,$00
-        dta $40,$01
-        dta $11,$FF
+        dta $24,$00,19          ; flags, ov_palette, repeat=20 lines
+        dta $62,$88,199         ; flags (OV+RPTL+END+OVADR), palette, repeat=200 lines
+        dta $00,$00,$00         ; overlay addr (lo, mid, hi) = $000000
+        dta $40,$01             ; overlay step = 320
+        dta $11,$FF             ; ov_width, ov_priority
 xdl_len = * - xdl_data
 
 ; ============================================
@@ -151,21 +169,25 @@ ic_bank dta 0
 .endp
 
 ; ============================================
-; BLITTER
+; RUN_BLIT - Start VBXE blitter using BCB at VRAM $07F100
+; BCB must be fully configured before calling.
+; Returns immediately — CPU continues while blitter runs.
+; Call wait_blit before next blit or BCB modification.
 ; ============================================
 .proc run_blit
-        jsr wait_blit
-        lda #$00
-        sta VBXE_BL_ADR0
+        jsr wait_blit           ; ensure previous blit finished
+        lda #$00                ; BCB address = $07F100
+        sta VBXE_BL_ADR0       ;   lo
         lda #$F1
-        sta VBXE_BL_ADR1
+        sta VBXE_BL_ADR1       ;   mid
         lda #$07
-        sta VBXE_BL_ADR2
+        sta VBXE_BL_ADR2       ;   hi
         lda #1
-        sta VBXE_BLITTER
-        rts                     ; return immediately, CPU works while blitter runs
+        sta VBXE_BLITTER       ; start blit (async)
+        rts
 .endp
 
+; WAIT_BLIT - Spin until blitter is idle (status register = 0)
 .proc wait_blit
 ?w      lda VBXE_BLITTER
         bne ?w
@@ -306,31 +328,35 @@ is_pal  dta 0
 .endp
 
 ; ============================================
-; BLIT SPRITE (transparent mode 1)
-; src = $01:(spr_off_hi+$10):spr_off_lo
+; BLIT SPRITE (transparent — color 0 = see-through)
+; Input: A = sprite index, zdx/zdxh = X pos, zdy = Y pos
+; Sprites stored in VRAM at: spr_off_bank:(spr_off_hi+$10):spr_off_lo
+; Handles right-edge and bottom-edge clipping automatically.
 ; ============================================
 .proc blit_sprite
         tax
         ; --- Right-edge clipping ---
+        ; Screen is 320px wide. zdxh:zdx is 16-bit X position.
+        ; zdxh>=2: entirely off screen (X>=512)
+        ; zdxh=1:  partially visible, clip to 320-256=64 available px
+        ; zdxh=0:  fully visible (max right edge = 255+16 = 271 < 320)
         lda zdxh
         cmp #2
         bcc ?xlt2
-        jmp ?skip               ; X >= 512: entirely off screen
+        jmp ?skip
 ?xlt2   cmp #1
-        beq ?clip_r             ; zdxh=1: may need right clip
-        ; zdxh=0: max right edge = 255+16=271 < 320, no clip
+        beq ?clip_r
         lda spr_w,x
         sta bs_w
         jmp ?chk_bot
-?clip_r ; zdxh=1: available width = 320-256-zdx = 64-zdx
-        lda #64
+?clip_r lda #64                 ; available pixels = 320 - 256 - zdx
         sec
         sbc zdx
         beq ?cr_off
-        bcc ?cr_off             ; zdx >= 64: off screen
+        bcc ?cr_off             ; zdx >= 64: sprite fully off right edge
         cmp spr_w,x
-        bcs ?clip_rok           ; available >= sprite width
-        sta bs_w                ; clipped width
+        bcs ?clip_rok           ; available >= sprite width: no clip needed
+        sta bs_w                ; clipped width = available pixels
         jmp ?chk_bot
 ?cr_off jmp ?skip
 ?clip_rok
@@ -339,14 +365,15 @@ is_pal  dta 0
 
 ?chk_bot
         ; --- Bottom-edge clipping ---
+        ; If sprite extends below Y=200, reduce height
         lda spr_h,x
         sta bs_h
         lda zdy
         clc
         adc bs_h
-        cmp #SCR_H+1            ; zdy + h > 200?
+        cmp #SCR_H+1
         bcc ?no_bclip
-        lda #SCR_H              ; clip: new height = 200 - zdy
+        lda #SCR_H              ; clipped height = 200 - zdy
         sec
         sbc zdy
         bne ?bclip_ok
@@ -354,47 +381,50 @@ is_pal  dta 0
 ?bclip_ok
         sta bs_h
 ?no_bclip
-        ; --- Blit ---
+        ; --- Configure BCB and blit ---
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
+        ; Source VRAM address from lookup tables
+        ; Final addr = spr_off_bank:(spr_off_hi+$10):spr_off_lo
+        ; The +$10 offset is because sprites start at VRAM $01_10_00
         lda spr_off_lo,x
-        sta MEMW+[VRAM_BCB&$FFF]+0
+        sta MEMW+[VRAM_BCB&$FFF]+0     ; src addr lo
         lda spr_off_hi,x
         clc
         adc #$10
-        sta MEMW+[VRAM_BCB&$FFF]+1
+        sta MEMW+[VRAM_BCB&$FFF]+1     ; src addr mid
         lda spr_off_bank,x
-        adc #0
-        sta MEMW+[VRAM_BCB&$FFF]+2
-        ; src step = original sprite width (not clipped!)
+        adc #0                          ; propagate carry
+        sta MEMW+[VRAM_BCB&$FFF]+2     ; src addr hi
+        ; Source row step = full sprite width (not clipped, to skip hidden cols)
         lda spr_w,x
-        sta MEMW+[VRAM_BCB&$FFF]+3
+        sta MEMW+[VRAM_BCB&$FFF]+3     ; src step lo
         lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+4
+        sta MEMW+[VRAM_BCB&$FFF]+4     ; src step hi
         lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+5
+        sta MEMW+[VRAM_BCB&$FFF]+5     ; src step mode
+        ; Destination = screen position (calc_dst uses zdx/zdxh/zdy/zbuf_hi)
         jsr calc_dst
         lda zva
-        sta MEMW+[VRAM_BCB&$FFF]+6
+        sta MEMW+[VRAM_BCB&$FFF]+6     ; dst addr lo
         lda zva+1
-        sta MEMW+[VRAM_BCB&$FFF]+7
+        sta MEMW+[VRAM_BCB&$FFF]+7     ; dst addr mid
         lda zva+2
-        sta MEMW+[VRAM_BCB&$FFF]+8
-        ; dst step [9-11] pre-filled by setup_xdl
-        ; Blit size = clipped width x clipped height
+        sta MEMW+[VRAM_BCB&$FFF]+8     ; dst addr hi
+        ; dst step [9-11], AND [15], XOR [16-19] pre-filled by setup_xdl
+        ; Blit size = (clipped width - 1) x (clipped height - 1)
         lda bs_w
         sec
         sbc #1
-        sta MEMW+[VRAM_BCB&$FFF]+12
+        sta MEMW+[VRAM_BCB&$FFF]+12    ; width-1 lo
         lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+13
+        sta MEMW+[VRAM_BCB&$FFF]+13    ; width-1 hi
         lda bs_h
         sec
         sbc #1
-        sta MEMW+[VRAM_BCB&$FFF]+14
-        ; AND [15], XOR [16-19] pre-filled by setup_xdl
-        lda #BLT_TRANS
-        sta MEMW+[VRAM_BCB&$FFF]+20
+        sta MEMW+[VRAM_BCB&$FFF]+14    ; height-1
+        lda #BLT_TRANS                  ; transparent: skip color 0
+        sta MEMW+[VRAM_BCB&$FFF]+20    ; blit mode
         jsr run_blit
 ?skip   rts
 .endp

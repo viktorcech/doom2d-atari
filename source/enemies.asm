@@ -120,37 +120,43 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         beq ?normal_los
         jmp ?no_attack          ; alerted + falling = keep chasing
 ?normal_los
-        ; --- LOS check: can enemy see player? ---
-        ; Y distance must be within 128px
+        ; --- LOS (Line Of Sight) check ---
+        ; Algorithm:
+        ; 1. Vertical distance check: |en_y - zpy| < 48 (same platform)
+        ; 2. Proximity check: |en_x - zpx| < 48 → always alert (close range)
+        ; 3. Direction check: enemy must face the player (skip if alerted)
+        ; 4. Horizontal tile scan: check all tiles between enemy and player
+        ;    for solid blocks. If any solid tile found → LOS blocked.
+        ;
+        ; Step 1: Vertical distance — abs(en_y - zpy)
         lda en_y,x
         sec
         sbc zpy
-        bpl ?yp
-        eor #$FF
+        bpl ?yp                 ; positive? keep as-is
+        eor #$FF               ; negate: abs = NOT(val) + 1
         clc
         adc #1
-?yp     cmp #48             ; detect only on same/adjacent platform
+?yp     cmp #48                 ; > 48px apart vertically?
         bcc ?los_check
-        jmp ?idle
+        jmp ?idle               ; too far vertically, don't detect
 ?los_check
-        ; Proximity check: |enxhi:en_x - zpx_hi:zpx| < 48 = always detect
+        ; Step 2: Proximity — 16-bit abs(enxhi:en_x - zpx_hi:zpx)
         lda en_x,x
         sec
         sbc zpx
-        sta los_cur         ; temp dist low
+        sta los_cur             ; dist lo (may be negative)
         lda enxhi,x
         sbc zpx_hi
         bpl ?ppos
-        ; Negate 16-bit
+        ; Result negative → negate to get absolute value
         lda #0
         sec
         sbc los_cur
         sta los_cur
-?ppos   ; A=dist high, los_cur=dist low
-        bne ?no_prox        ; high != 0 → distance > 255
+?ppos   bne ?no_prox            ; hi byte != 0 → distance > 255
         lda los_cur
         cmp #48
-        bcc ?dir_ok         ; within 48px = proximity alert!
+        bcc ?dir_ok             ; within 48px = proximity alert!
 ?no_prox
         ; If already alerted, skip direction check (360° awareness)
         lda en_cooldown,x
@@ -198,43 +204,45 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         lda map_row_hi,y
         sta ztptr+1
         ; Enemy tile column = (enxhi:en_x + 8) / 16
+        ; +8 = center of 16px sprite. Divide 16-bit value by 16:
+        ;   result = (hi << 4) | (lo >> 4)  [same formula as mark_dirty_sprite]
         ldx zzidx
         lda en_x,x
         clc
-        adc #8
-        pha                 ; save low byte
+        adc #8              ; center X
+        pha
         lda enxhi,x
-        adc #0              ; add carry
+        adc #0              ; propagate carry
+        asl                 ; hi << 4 (shift left 4 times)
         asl
         asl
         asl
-        asl                 ; hi * 16
         sta los_ecol
         pla
+        lsr                 ; lo >> 4 (shift right 4 times)
         lsr
         lsr
         lsr
-        lsr                 ; low / 16
-        ora los_ecol
+        ora los_ecol        ; combine hi and lo parts
         sta los_ecol
 
-        ; Player tile column = (zpx_hi:zpx + 8) / 16
+        ; Player tile column — same formula
         lda zpx
         clc
         adc #8
-        sta los_pcol        ; temp
+        sta los_pcol
         lda zpx_hi
-        adc #0              ; carry from zpx+8
+        adc #0
         asl
         asl
         asl
-        asl                 ; hi * 16
-        sta los_end         ; temp
+        asl
+        sta los_end
         lda los_pcol
         lsr
         lsr
         lsr
-        lsr                 ; (zpx+8) / 16
+        lsr
         clc
         adc los_end
         sta los_pcol

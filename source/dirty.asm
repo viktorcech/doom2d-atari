@@ -178,47 +178,49 @@ rd_idx  dta 0
 ; Marks tiles covered by sprite at (zdx:zdxh, zdy)
 ; with size md_w x md_h as dirty.
 ; Call BEFORE blit_sprite for each sprite.
+;
+; Tiles are 16x16 px, so pixel-to-tile conversion = divide by 16.
+; For X: tiles can span 0-319 (20 cols), needing 16-bit pixel coords.
+;   tile_col = (zdxh:zdx) / 16 = (zdxh << 4) | (zdx >> 4)
+; For Y: tiles span 0-191 (12 rows), 8-bit is enough.
+;   tile_row = zdy / 16 = zdy >> 4
 ; ============================================
 .proc mark_dirty_sprite
-        ; --- Left column ---
-        ; col = (zdxh << 4) | (zdx >> 4)
+        ; --- Left column = pixel X / 16 ---
         lda zdxh
         cmp #2
         bcc ?onscr
-        rts                     ; off screen right, skip
+        rts                     ; off screen right (X>=512), skip
 ?onscr
-        asl
+        asl                     ; zdxh << 4: hi byte contributes bits 4+
         asl
         asl
         asl
         sta md_cl
         lda zdx
+        lsr                     ; zdx >> 4: lo byte contributes bits 0-3
         lsr
         lsr
         lsr
-        lsr
-        ora md_cl
-        sta md_cl               ; left column
+        ora md_cl               ; combine into tile column
+        sta md_cl
 
-        ; --- Right column ---
-        ; right_x = zdx + md_w - 1 (16-bit)
-        lda zdx
+        ; --- Right column = (X + width - 1) / 16 ---
+        lda zdx                 ; 16-bit: zt2:zt = zdx:zdxh + md_w - 1
         clc
         adc md_w
         sta zt
         lda zdxh
         adc #0
-        sta zt2                 ; zt2:zt = zdx + md_w
-        ; Subtract 1
-        lda zt
+        sta zt2
+        lda zt                  ; subtract 1 for rightmost pixel
         sec
         sbc #1
         sta zt
         lda zt2
         sbc #0
-        sta zt2                 ; zt2:zt = right pixel
-        ; col = (zt2 << 4) | (zt >> 4)
-        lda zt2
+        sta zt2
+        lda zt2                 ; same pixel-to-tile formula
         asl
         asl
         asl
@@ -230,27 +232,27 @@ rd_idx  dta 0
         lsr
         lsr
         ora md_cr
-        sta md_cr               ; right column
+        sta md_cr
 
-        ; --- Top row ---
+        ; --- Top row = Y / 16 ---
         lda zdy
         lsr
         lsr
         lsr
         lsr
-        sta md_rt               ; top row
+        sta md_rt
 
-        ; --- Bottom row ---
+        ; --- Bottom row = (Y + height - 1) / 16 ---
         lda zdy
         clc
         adc md_h
         sec
-        sbc #1                  ; bottom pixel
+        sbc #1
         lsr
         lsr
         lsr
         lsr
-        sta md_rb               ; bottom row
+        sta md_rb
 
         ; --- Clamp to screen bounds ---
         lda md_cl

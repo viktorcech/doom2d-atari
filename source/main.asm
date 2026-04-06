@@ -26,19 +26,28 @@
         ini early_init
 
 ;==============================================
-; MEMAC-B read trampoline (must be below $4000!)
-; MEMAC-B maps $4000-$7FFF to VRAM when enabled.
-; snd_irq code may be at $4000+, so enable/read/disable
-; must execute from here ($0610) to avoid crash.
+; MEMAC-B READ TRAMPOLINE (must live below $4000!)
+;
+; VBXE MEMAC-B maps the CPU address range $4000-$7FFF to VRAM
+; when enabled. Game code and variables also live in $4000-$7FFF,
+; so MEMAC-B must only be enabled for the absolute minimum time.
+;
+; This trampoline at $0610 (safely below $4000):
+;   1. Enables MEMAC-B → $4000-$7FFF now reads from VRAM
+;   2. Reads one byte from (snd_ptr) which points into $4000-$7FFF
+;   3. Disables MEMAC-B → $4000-$7FFF back to normal RAM
+;
+; Called from the sound IRQ handler (snd_irq) to fetch the next
+; PCM sample byte from VRAM sound data.
 ;==============================================
         org $0610
 snd_memac_read
         lda snd_bank
-        sta VBXE_MEMAC_B
+        sta VBXE_MEMAC_B       ; enable MEMAC-B (maps $4000-$7FFF → VRAM)
         ldy #0
-        lda (snd_ptr),y
-        sty VBXE_MEMAC_B
-        sta snd_cur_byte
+        lda (snd_ptr),y        ; read 1 byte from VRAM sound data
+        sty VBXE_MEMAC_B       ; disable MEMAC-B (Y=0 → back to RAM)
+        sta snd_cur_byte        ; cache for IRQ handler
         rts
 
 ;==============================================
@@ -164,54 +173,59 @@ s_edev  dta c'E:',$9B
         lda #2
         sta hud_full_clear
 
-; --- Game loop (double buffered) ---
+; =============================================
+; MAIN GAME LOOP — double-buffered, 1 frame per VBLANK
+;
+; Each frame:
+;   1. Handle ESC (pause menu)
+;   2. Update game logic (player, enemies, projectiles, items, doors)
+;   3. Restore dirty tiles (erase sprites from last frame)
+;   4. Render all sprites and HUD to back buffer
+;   5. Wait for blitter + VBLANK
+;   6. Swap display/draw buffers (XDL shows back, draw to front)
+;
+; Double buffering: zbuf_hi alternates between $00 (buffer 0)
+; and $02 (buffer 1, at VRAM $020000). One buffer is displayed
+; while the other is drawn to, eliminating flicker.
+; =============================================
 ?loop
-        ; ESC = pause + menu
-        lda $02FC
-        cmp #$1C
+        ; --- ESC = open pause menu ---
+        lda $02FC               ; keyboard scan code register
+        cmp #$1C                ; ESC key
         bne ?no_esc
         lda #$FF
-        sta $02FC
+        sta $02FC               ; clear key
         jsr menu_pause
         cmp #1
-        beq ?start_game         ; new game requested
+        beq ?start_game         ; A=1: user chose New Game
 ?no_esc
-        inc zfr
+        inc zfr                 ; global frame counter (used for animations)
 
-        ; PROFILING: uncomment STA $D01A lines to see border color timing
-        ; Colors: $10=gray(logic) $30=red(dirty) $C0=green(render)
-        ;         $90=blue(HUD) $50=purple(blit wait) $00=black(idle)
-        ; lda #$10
-        ; sta $D01A
-
+        ; --- LOGIC PHASE ---
         jsr read_input
-        ; Check player death
         lda zphp
         bne ?alive
-        jsr player_dead
+        jsr player_dead         ; death animation (no player control)
         jsr update_enemies
         jsr update_decorations
         jmp ?skip_logic
 ?alive
         jsr player_update
         jsr update_enemies
-        jsr proj_update
-        jsr eproj_update
+        jsr proj_update         ; player projectiles
+        jsr eproj_update        ; enemy projectiles (imp/caco fireballs)
         jsr update_pickups
         jsr update_decorations
         jsr update_doors
         jsr update_switches
         jsr check_floor_triggers
         jsr sound_update
-        jsr fps_update
 ?skip_logic
 
-        ; lda #$30
-        ; sta $D01A
+        ; --- RENDER PHASE ---
+        ; First restore background tiles where sprites were last frame
         jsr restore_dirty
-
-        ; lda #$C0
-        ; sta $D01A
+        ; Then draw all sprites (each marks its tiles as dirty for next frame)
         jsr render_pickups_nodirty
         jsr render_decor_nodirty
         jsr render_exploding
@@ -219,31 +233,23 @@ s_edev  dta c'E:',$9B
         jsr render_projs
         jsr render_eproj
         jsr render_player
-
-        ; lda #$90
-        ; sta $D01A
+        ; HUD overlay (health, ammo, weapon icon, keys)
         jsr render_hud
-        jsr fps_render
 
-        ; lda #$50
-        ; sta $D01A
-        jsr wait_blit
+        ; --- SYNC PHASE ---
+        jsr wait_blit           ; ensure all blitter ops finished
 
-        ; lda #$00
-        ; sta $D01A
-
-        ; Wait VBLANK
-        lda RTCLOK3
+        lda RTCLOK3             ; wait for VBLANK (next frame)
 ?vsync  cmp RTCLOK3
         beq ?vsync
 
-        ; Swap: update XDL overlay address to show back buffer
+        ; Show the back buffer by updating XDL overlay address
         lda #BANK_EN+BANK_XDL
         sta VBXE_BANK_SEL
-        lda zbuf_hi             ; current back buffer high byte
-        sta MEMW+[VRAM_XDL&$FFF]+8  ; XDL overlay addr high byte
+        lda zbuf_hi
+        sta MEMW+[VRAM_XDL&$FFF]+8
 
-        ; Flip: toggle zbuf_hi between $00 and $02
+        ; Flip draw target: $00 ↔ $02
         lda zbuf_hi
         eor #SCR1_HI
         sta zbuf_hi
@@ -282,15 +288,9 @@ no_vbxe_len = *-no_vbxe_msg
         icl 'sound.asm'
         icl 'data.asm'
 
-        icl 'uploads.asm'
-        icl 'uploads_title.asm'
-
 ;==============================================
-; INIT OVERLAY SEGMENT ($6000)
-; These procs run once during init_game, then memory is free.
-; Must be the LAST org $6000 segment (after all uploads).
+; INIT PROCEDURES (persistent, callable on New Game)
 ;==============================================
-        org $6000
 
 .proc init_enemies
         ldx #0
@@ -318,6 +318,7 @@ no_vbxe_len = *-no_vbxe_msg
         sta en_tcnt,x
         sta envelx,x
         sta en_pain_tmr,x
+        sta en_dtimer,x
         lda #60
         sta en_atk,x
         lda enemy_spawn_dir,x
@@ -514,5 +515,8 @@ id_key  dta 0
         sta zbuf_hi
         rts
 .endp
+
+        icl 'uploads.asm'
+        icl 'uploads_title.asm'
 
         run main

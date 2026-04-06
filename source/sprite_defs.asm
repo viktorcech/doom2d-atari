@@ -144,14 +144,14 @@ SPR_ROCKET1PK                equ 134  ; 16x16, VRAM $01F580
 SPR_ARMORBONUS               equ 135  ; 16x16, VRAM $01F680
 SPR_PL_DEATH2                equ 136  ; 16x32, VRAM $01F780
 SPR_PL_DEATH3                equ 137  ; 16x32, VRAM $01F980
-SPR_IMP_FIRE1                equ 138  ; 8x8,   VRAM $01E800
-SPR_IMP_FIRE2                equ 139  ; 8x8,   VRAM $01E840
+SPR_IMP_FIRE1                equ 138  ; 8x8,   VRAM $01E400
+SPR_IMP_FIRE2                equ 139  ; 8x8,   VRAM $01E440
 SPR_PL_PAIN                  equ 140  ; 16x32, VRAM $051000
 SPR_PL_PAIN_L                equ 141  ; 16x32, VRAM $051200
 SPR_ZOMBIE_PAIN              equ 142  ; 16x32, VRAM $051400
 SPR_ZOMBIE_PAIN_L            equ 143  ; 16x32, VRAM $051600
-SPR_CACO_FIRE1               equ 144  ; 8x8,   VRAM $01E880
-SPR_CACO_FIRE2               equ 145  ; 8x8,   VRAM $01E8C0
+SPR_CACO_FIRE1               equ 144  ; 8x8,   VRAM $01E480
+SPR_CACO_FIRE2               equ 145  ; 8x8,   VRAM $01E4C0
 SPRITESHEET_SIZE         equ $C000      ; chunks 1-4 (49152 bytes)
 
 ; Player sprite aliases
@@ -316,14 +316,14 @@ spr_off_lo
         dta <$0080  ; armorbonus (VRAM $01F680)
         dta <$0080  ; pl_death2 (VRAM $01F780)
         dta <$0080  ; pl_death3 (VRAM $01F980)
-        dta <$0000  ; imp_fire1 (VRAM $01E800)
-        dta <$0040  ; imp_fire2 (VRAM $01E840)
+        dta <$0000  ; imp_fire1 (VRAM $01E400)
+        dta <$0040  ; imp_fire2 (VRAM $01E440)
         dta <$0000  ; pl_pain (VRAM $051000)
         dta <$0000  ; pl_pain_L (VRAM $051200)
         dta <$0000  ; zombie_pain (VRAM $051400)
         dta <$0000  ; zombie_pain_L (VRAM $051600)
-        dta <$0080  ; caco_fire1 (VRAM $01E880)
-        dta <$00C0  ; caco_fire2 (VRAM $01E8C0)
+        dta <$0080  ; caco_fire1 (VRAM $01E480)
+        dta <$00C0  ; caco_fire2 (VRAM $01E4C0)
 
 spr_off_hi
         dta >$0000  ; player_idle
@@ -464,14 +464,14 @@ spr_off_hi
         dta >$E600  ; armorbonus ($01F680)
         dta >$E700  ; pl_death2 ($01F780)
         dta >$E900  ; pl_death3 ($01F980)
-        dta >$D800  ; imp_fire1 ($01E800, +$10=$E8)
-        dta >$D840  ; imp_fire2 ($01E840, +$10=$E8)
+        dta >$D400  ; imp_fire1 ($01E400, +$10=$E4)
+        dta >$D440  ; imp_fire2 ($01E440, +$10=$E4)
         dta >$0000  ; pl_pain ($051000, +$10=$10)
         dta >$0200  ; pl_pain_L ($051200, +$10=$12)
         dta >$0400  ; zombie_pain ($051400, +$10=$14)
         dta >$0600  ; zombie_pain_L ($051600, +$10=$16)
-        dta >$D880  ; caco_fire1 ($01E880, +$10=$E8)
-        dta >$D8C0  ; caco_fire2 ($01E8C0, +$10=$E8)
+        dta >$D480  ; caco_fire1 ($01E480, +$10=$E4)
+        dta >$D4C0  ; caco_fire2 ($01E4C0, +$10=$E4)
 
 ; Sprite VRAM bank table (high byte of 24-bit VRAM address)
 ; $01 = banks $10-$1F (VRAM $01xxxx), $03 = banks $30+ (VRAM $03xxxx)

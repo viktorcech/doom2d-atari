@@ -170,17 +170,20 @@
         clc
         adc #4                 ; shoot = base + 4
         jmp ?dodraw
-?walk   ; Walk animation: frame = (zfr >> 3) & 3, cycle 0,1,2,1
+?walk   ; Walk animation: cycle through 3 walk frames in pattern 1,2,3,2
+        ; (zfr >> 3) & 3 gives values 0,1,2,3 cycling every 8 frames
+        ; When result is 3, remap to 1 → final pattern: 0,1,2,1
+        ; Then +1 to offset from base (walk sprites = base+1..base+3)
         lda zfr
         lsr
         lsr
-        lsr
-        and #$03
+        lsr                ; zfr / 8 = change frame every 8 game frames
+        and #$03           ; mod 4 = values 0,1,2,3
         cmp #3
         bne ?fok
-        lda #1
+        lda #1             ; 3 → 1 (creates bounce: 0,1,2,1,0,1,2,1...)
 ?fok    clc
-        adc #1             ; +1 because walk frames start at base+1
+        adc #1             ; walk1=base+1, walk2=base+2, walk3=base+3
         clc
         adc re_base
 ?dodraw ; Mark dirty tiles before drawing

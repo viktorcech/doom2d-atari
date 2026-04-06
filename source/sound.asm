@@ -144,59 +144,74 @@ snd_queue_lock  dta 0           ; lock value for queued sound
 .endp
 
 ; ============================================
-; IRQ HANDLER (MEMAC-B)
-; ~65 cycles, no BANK_SEL conflict with graphics
+; TIMER 1 IRQ HANDLER — 4-bit PCM playback from VRAM
+;
+; Sound data is stored as packed 4-bit samples in VBXE VRAM.
+; Each byte = 2 samples (hi nibble first, lo nibble second).
+; The IRQ fires at ~15.7 kHz (NTSC) for ~7.8 kHz effective rate.
+;
+; Phase 0 (hi nibble): just output cached byte's hi nibble (fast path)
+; Phase 1 (lo nibble): output lo nibble, advance pointer, read next byte
+;
+; VRAM is read via MEMAC-B ($4000-$7FFF window) through a trampoline
+; at $0610 (below $4000) to avoid self-mapping conflict.
+; MEMAC-B is independent from MEMAC-A, so no BANK_SEL conflicts.
+;
+; ~65 cycles worst case. No CLI inside — no nested IRQs.
 ; ============================================
 .proc snd_irq
         pha
 
+        ; Check if this is our Timer 1 IRQ (bit 0)
         lda IRQEN
         and #$01
         beq ?is_ours
-        jmp ?not_ours
+        jmp ?not_ours           ; not ours, chain to original handler
 ?is_ours
+        ; Re-arm Timer 1 IRQ
         lda POKMSK
         and #$FE
-        sta IRQEN
+        sta IRQEN               ; briefly disable Timer 1
         lda POKMSK
-        sta IRQEN
+        sta IRQEN               ; re-enable all masked IRQs
 
         lda snd_active
-        beq ?silent
+        beq ?silent             ; no sound playing
 
         lda snd_phase
         bne ?lo
 
-        ; --- Hi nibble: just output (no VRAM read = fast!) ---
+        ; --- Phase 0: output hi nibble (no VRAM access = fast!) ---
         lda snd_cur_byte
+        lsr                     ; extract hi nibble
         lsr
         lsr
         lsr
-        lsr
-        ora #$10
+        ora #$10                ; volume bit (AUDC4 format: $1x = vol x)
         sta AUDC4
-        inc snd_phase          ; 0 → 1
+        inc snd_phase           ; next IRQ will do lo nibble
         pla
         rti
 
-?lo     ; --- Lo nibble: output + advance + read next byte ---
+?lo     ; --- Phase 1: output lo nibble + advance to next byte ---
         lda snd_cur_byte
-        and #$0F
-        ora #$10
+        and #$0F                ; extract lo nibble
+        ora #$10                ; volume bit
         sta AUDC4
-        dec snd_phase          ; 1 → 0
+        dec snd_phase           ; next IRQ will do hi nibble
 
+        ; Advance VRAM read pointer (16-bit within MEMAC-B window $4000-$7FFF)
         inc snd_ptr
         bne ?nc
         inc snd_ptr+1
         lda snd_ptr+1
-        cmp #$80
+        cmp #$80                ; wrapped past $7FFF?
         bne ?nc
-        lda #$40
+        lda #$40                ; wrap back to $4000
         sta snd_ptr+1
-        inc snd_bank
+        inc snd_bank            ; next 16KB VRAM bank
 ?nc
-        ; End check
+        ; Check if we've reached end of sound
         lda snd_bank
         cmp snd_play.snd_end_bank
         bne ?read
@@ -207,7 +222,7 @@ snd_queue_lock  dta 0           ; lock value for queued sound
         cmp snd_end
         bne ?read
 
-        ; Sound finished
+        ; Sound finished — silence and disable Timer 1 IRQ
         lda #0
         sta snd_active
         sta AUDC4
@@ -218,14 +233,15 @@ snd_queue_lock  dta 0           ; lock value for queued sound
         pla
         rti
 
-?read   ; Pre-read next byte via trampoline (for next hi nibble)
+?read   ; Pre-read next byte from VRAM (via trampoline at $0610)
         sty snd_save_y
-        jsr snd_memac_read
+        jsr snd_memac_read      ; enables MEMAC-B briefly, reads 1 byte
         ldy snd_save_y
         pla
         rti
 
-?silent lda POKMSK
+?silent ; No active sound — disable Timer 1 IRQ to save cycles
+        lda POKMSK
         and #$FE
         sta POKMSK
         sta IRQEN
@@ -234,7 +250,7 @@ snd_queue_lock  dta 0           ; lock value for queued sound
 
 ?not_ours
         pla
-        jmp (old_iir)
+        jmp (old_iir)           ; chain to original VIMIRQ handler
 .endp
 
 ; ============================================
