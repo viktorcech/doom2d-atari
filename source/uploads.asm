@@ -9,6 +9,10 @@
 ; Copies data through the MEMAC-A window ($9000-$9FFF, 4KB per bank).
 ; Each bank maps a 4KB slice of VRAM. Multi-bank uploads are supported.
 ;
+; Placed at $0630 (init-only, after snd_memac_read at $0610).
+; Safe: below bootloader ($0700) and SECBUF ($0800).
+; Frees ~88 bytes in the main segment (was near $6000 limit).
+;
 ; Params:
 ;   zsrc      = 16-bit source pointer in RAM (e.g. $6000)
 ;   uc_bank   = VBXE bank number (BANK_EN + bank, e.g. $9E for VRAM $01E000)
@@ -18,6 +22,7 @@
 ; During upload, OS ROM is disabled ($D301) and POKEY IRQs are masked
 ; to prevent interference with the MEMAC-A window.
 ;==============================================
+        org $0630
 .proc generic_upload
         lda #$90+MC_CPU         ; MEMAC-A: 4KB window at $9000, CPU access
         sta VBXE_MEMAC_CTRL
@@ -69,7 +74,7 @@ uc_lastpg dta 0
 ;==============================================
         org $6000
 map_bin_data
-        ins '../data/test_map.bin'
+        ins '../data/map1.bin'
         ins '../data/imp_fireball.bin'
         ins '../data/caco_fireball.bin'
 
@@ -296,6 +301,8 @@ spritesheet_c5
 switch_tiles
         ins '../data/switch_off.bin'
         ins '../data/switch_on.bin'
+        ins '../data/switch3_off.bin'
+        ins '../data/switch3_on.bin'
         org $0580
 .proc upload_switch_tiles
         lda #<switch_tiles
@@ -306,7 +313,7 @@ switch_tiles
         sta uc_bank
         lda #1
         sta uc_cnt
-        lda #2
+        lda #4
         sta uc_lastpg
         jsr generic_upload
         rts

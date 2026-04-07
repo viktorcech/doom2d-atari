@@ -23,9 +23,11 @@
         sta zpcells
         sta zparmor
         sta zpkeys
-        lda #SPAWN_X
+        lda pl_start_x
         sta zpx
-        lda #SPAWN_Y
+        lda pl_start_x+1
+        sta zpx_hi
+        lda pl_start_y
         sta zpy
         lda #100
         sta zphp

@@ -38,6 +38,12 @@ ztrigp          = $AB       ; previous trigger
 ; Current enemy temp vars
 zzidx           = $B5       ; current enemy index
 
+; Hot loop counters (proj-enemy collision)
+zcp_proj        = $AC       ; projectile index in collision loop
+zcp_eidx        = $AD       ; enemy index in collision loop
+zcp_tmp         = $AE       ; collision temp
+zcp_tmph        = $AF       ; collision temp hi
+
 zpwcool         = $C3       ; weapon cooldown timer
 snd_ptr         = $C4       ; 2b: current sample address (sound IRQ)
 snd_end         = $C6       ; 2b: end of sample address

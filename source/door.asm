@@ -364,7 +364,37 @@ cpid_hrow dta 0
         lda #1
         sta dirty_0,y
         sta dirty_1,y
+        ; Update scan bbox for both buffers
+        sta scan_any_0
+        sta scan_any_1
         ldx mdd_idx
+        lda door_col,x
+        cmp scan_min_col_0
+        bcs ?a
+        sta scan_min_col_0
+?a      sta scan_min_col_1
+        lda door_col,x
+        cmp scan_max_col_0
+        bcc ?b
+        sta scan_max_col_0
+?b      cmp scan_max_col_1
+        bcc ?c
+        sta scan_max_col_1
+?c      lda door_row,x
+        cmp scan_min_row_0
+        bcs ?d
+        sta scan_min_row_0
+?d      cmp scan_min_row_1
+        bcs ?e
+        sta scan_min_row_1
+?e      lda door_row,x
+        cmp scan_max_row_0
+        bcc ?f
+        sta scan_max_row_0
+?f      cmp scan_max_row_1
+        bcc ?g
+        sta scan_max_row_1
+?g      ldx mdd_idx
         rts
 mdd_idx dta 0
 .endp

@@ -51,6 +51,14 @@ snd_memac_read
         rts
 
 ;==============================================
+; ASSET UPLOADS — INI segments that run during XEX load
+; Each loads data at $6000, uploads to VRAM, then next overwrites $6000.
+; Must come BEFORE main segment so main code above $6000 isn't clobbered.
+;==============================================
+        icl 'uploads.asm'
+        icl 'uploads_title.asm'
+
+;==============================================
         org $2000
 ;==============================================
 
@@ -156,10 +164,46 @@ s_edev  dta c'E:',$9B
 ; =============================================
         jsr menu_title_screen
 
+        ; Check if LOAD GAME was selected
+        lda menu_result
+        cmp #2
+        beq ?loaded_game
+
+?new_game
+        lda #0
+        sta current_level
 ?start_game
         lda #STATE_PLAYING
         sta game_state
+        jsr load_level
         jsr init_game
+        jmp ?loaded_game
+
+        ; --- NEXT LEVEL: keep player weapons/hp/armor/keys ---
+?next_level
+        lda #0
+        sta level_complete
+        jsr load_level
+        jsr init_enemies
+        jsr init_pickups
+        jsr init_decorations
+        jsr init_doors
+        ; Reset player position to new level spawn (keep everything else)
+        lda pl_start_x
+        sta zpx
+        lda pl_start_x+1
+        sta zpx_hi
+        lda pl_start_y
+        sta zpy
+        lda #0
+        sta zpvx
+        sta zpvy
+        sta zpgnd
+        sta zpkeys              ; keys don't carry between levels
+
+?loaded_game
+        lda #STATE_PLAYING
+        sta game_state
         jsr init_render
         ; Force HUD full redraw
         lda #$FF
@@ -197,7 +241,9 @@ s_edev  dta c'E:',$9B
         sta $02FC               ; clear key
         jsr menu_pause
         cmp #1
-        beq ?start_game         ; A=1: user chose New Game
+        beq ?new_game           ; A=1: user chose New Game
+        cmp #2
+        beq ?loaded_game        ; A=2: user loaded a save
 ?no_esc
         inc zfr                 ; global frame counter (used for animations)
 
@@ -220,6 +266,19 @@ s_edev  dta c'E:',$9B
         jsr update_switches
         jsr check_floor_triggers
         jsr sound_update
+        ; --- EXIT SWITCH CHECK ---
+        lda level_complete
+        beq ?no_exit
+        ; Advance to next level (wrap if last)
+        inc current_level
+        lda current_level
+        cmp num_levels
+        bcc ?next_ok
+        lda #0
+        sta current_level       ; wrap to level 0
+?next_ok
+        jmp ?next_level
+?no_exit
 ?skip_logic
 
         ; --- RENDER PHASE ---
@@ -286,15 +345,20 @@ no_vbxe_len = *-no_vbxe_msg
         icl 'door.asm'
         icl 'switches.asm'
         icl 'sound.asm'
+        icl 'diskio.asm'
+        icl 'savegame.asm'
         icl 'data.asm'
 
 ;==============================================
-; INIT PROCEDURES (persistent, callable on New Game)
+; INIT PROCEDURES — now part of main segment
+; No longer need separate org: main segment extends past $6000
+; up to $8FFF (MEMAC-A window starts at $9000).
+; Called at runtime (New Game, level transition, death restart).
 ;==============================================
 
 .proc init_enemies
         ldx #0
-?lp     cpx #NUM_ENEMIES
+?lp     cpx num_en
         bcs ?done
         lda #1
         sta en_act,x
@@ -356,7 +420,7 @@ no_vbxe_len = *-no_vbxe_msg
         sta zparmor
         sta zpkeys
         ldx #0
-?lp     cpx #NUM_PICKUPS
+?lp     cpx num_pk
         bcs ?done
         lda #1
         sta pk_act,x
@@ -384,7 +448,7 @@ no_vbxe_len = *-no_vbxe_msg
 
 .proc init_decorations
         ldx #0
-?lp     cpx #NUM_DECOR
+?lp     cpx num_dc
         bcs ?done
         lda #1
         sta dc_act,x
@@ -491,12 +555,13 @@ id_key  dta 0
 
 .proc init_render
         jsr clear_dirty_all
+        ; Full black clear of both buffers (320x200, kills all garbage)
         lda #$00
         sta zbuf_hi
-        jsr clear_hud_area
+        jsr clear_full_black
         lda #SCR1_HI
         sta zbuf_hi
-        jsr clear_hud_area
+        jsr clear_full_black
         lda #$00
         sta zbuf_hi
         jsr setup_dirty_ptr
@@ -515,8 +580,5 @@ id_key  dta 0
         sta zbuf_hi
         rts
 .endp
-
-        icl 'uploads.asm'
-        icl 'uploads_title.asm'
 
         run main

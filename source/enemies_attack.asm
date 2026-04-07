@@ -9,17 +9,9 @@
 .proc enemy_do_attack
         ; --- Attack logic ---
         lda en_type,x
-        cmp #EN_ZOMBIE
-        beq ?atk_check
-        cmp #EN_SHOTGUN
-        beq ?atk_check
-        cmp #EN_IMP
-        beq ?atk_check
-        cmp #EN_PINKY
-        beq ?atk_check
-        cmp #EN_CACO
-        beq ?atk_check
-        rts
+        cmp #EN_BARON
+        bne ?atk_check
+        rts                    ; baron has no attack here
 ?atk_check
         lda en_atk,x
         beq ?do_attack

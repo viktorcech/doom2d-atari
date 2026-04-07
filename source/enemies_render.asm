@@ -148,17 +148,8 @@
 ?no_epain
         ; Check if shooting (just fired: alerted + timer in shoot range)
         lda en_type,x
-        cmp #EN_ZOMBIE
-        beq ?chk_shoot
-        cmp #EN_SHOTGUN
-        beq ?chk_shoot
-        cmp #EN_IMP
-        beq ?chk_shoot
-        cmp #EN_PINKY
-        beq ?chk_shoot
-        cmp #EN_CACO
-        beq ?chk_shoot
-        jmp ?walk
+        cmp #EN_BARON
+        beq ?walk              ; baron has no shoot sprite
 ?chk_shoot
         lda en_cooldown,x
         beq ?walk              ; not alerted = no shoot sprite

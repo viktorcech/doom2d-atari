@@ -41,6 +41,20 @@ dirty_1 .ds TILES_X*TILES_Y    ; 240 bytes for buffer 1
         sta dirty_1,y
         dey
         bpl ?lp
+        ; Reset scan bboxes
+        lda #TILES_X
+        sta scan_min_col_0
+        sta scan_min_col_1
+        lda #TILES_Y
+        sta scan_min_row_0
+        sta scan_min_row_1
+        lda #0
+        sta scan_max_col_0
+        sta scan_max_col_1
+        sta scan_max_row_0
+        sta scan_max_row_1
+        sta scan_any_0
+        sta scan_any_1
         rts
 .endp
 
@@ -87,16 +101,30 @@ rs_idx  dta 0
 ; Re-blits only tiles marked dirty, then clears flags.
 ; Call at start of render phase (before drawing sprites).
 ; ============================================
-; Dirty bounding box (set by restore_dirty, used by static redraw)
+; Dirty bounding box (set by restore_dirty, used by render_pickups_nodirty)
 dirty_min_col dta TILES_X
 dirty_max_col dta 0
 dirty_min_row dta TILES_Y
 dirty_max_row dta 0
 dirty_any     dta 0             ; 0 = no dirty tiles this frame
 
+; Per-buffer scan bbox (set by mark_dirty_sprite, used by restore_dirty)
+; Buffer 0
+scan_min_col_0 dta TILES_X
+scan_max_col_0 dta 0
+scan_min_row_0 dta TILES_Y
+scan_max_row_0 dta 0
+scan_any_0     dta 0
+; Buffer 1
+scan_min_col_1 dta TILES_X
+scan_max_col_1 dta 0
+scan_min_row_1 dta TILES_Y
+scan_max_row_1 dta 0
+scan_any_1     dta 0
+
 .proc restore_dirty
         jsr setup_dirty_ptr
-        ; Reset bounding box
+        ; Reset render bounding box (used by render_pickups_nodirty)
         lda #TILES_X
         sta dirty_min_col
         lda #TILES_Y
@@ -105,20 +133,78 @@ dirty_any     dta 0             ; 0 = no dirty tiles this frame
         sta dirty_max_col
         sta dirty_max_row
         sta dirty_any
-        sta rd_idx
+
+        ; Load scan bbox for current buffer, then reset it
+        lda zbuf_hi
+        bne ?ld1
+        ; Buffer 0
+        lda scan_any_0
+        bne ?has0
+        jmp ?exit               ; nothing dirty, skip entire scan
+?has0
+        lda scan_min_col_0
+        sta rd_scol
+        lda scan_max_col_0
+        sta rd_ecol
+        lda scan_min_row_0
+        sta rd_srow
+        lda scan_max_row_0
+        sta rd_erow
+        ; Reset scan bbox for buffer 0
+        lda #TILES_X
+        sta scan_min_col_0
+        lda #TILES_Y
+        sta scan_min_row_0
+        lda #0
+        sta scan_max_col_0
+        sta scan_max_row_0
+        sta scan_any_0
+        jmp ?scan
+?ld1    ; Buffer 1
+        lda scan_any_1
+        bne ?has1
+        jmp ?exit               ; nothing dirty, skip entire scan
+?has1
+        lda scan_min_col_1
+        sta rd_scol
+        lda scan_max_col_1
+        sta rd_ecol
+        lda scan_min_row_1
+        sta rd_srow
+        lda scan_max_row_1
+        sta rd_erow
+        ; Reset scan bbox for buffer 1
+        lda #TILES_X
+        sta scan_min_col_1
+        lda #TILES_Y
+        sta scan_min_row_1
+        lda #0
+        sta scan_max_col_1
+        sta scan_max_row_1
+        sta scan_any_1
+
+?scan   ; Set map bank once for entire restore loop
+        lda #BANK_EN+BANK_MAP
+        sta VBXE_BANK_SEL
+        lda rd_srow
         sta r_row
-?rrow   lda #0
+?rrow   lda rd_scol
         sta r_col
+        ; Compute base index: r_row * 20 + rd_scol
+        ldx r_row
+        lda row_x20,x
+        clc
+        adc rd_scol
+        sta rd_idx
 ?rcol   ldy rd_idx
         lda (dirty_ptr),y
         beq ?clean
 
         ; --- Dirty tile: restore it ---
-        ; Clear flag
         lda #0
         sta (dirty_ptr),y
 
-        ; Update bounding box
+        ; Update render bounding box (for render_pickups_nodirty)
         lda #1
         sta dirty_any
         lda r_col
@@ -136,9 +222,7 @@ dirty_any     dta 0             ; 0 = no dirty tiles this frame
         bcc ?nc4
         sta dirty_max_row
 ?nc4
-        ; Look up map tile at (r_col, r_row) [inlined calc_map_ptr]
-        lda #BANK_EN+BANK_MAP
-        sta VBXE_BANK_SEL
+        ; Look up map tile at (r_col, r_row) [bank already set before loop]
         ldy r_row
         lda map_row_lo,y
         clc
@@ -156,21 +240,36 @@ dirty_any     dta 0             ; 0 = no dirty tiles this frame
         ; Non-empty tile: blit it
         sta r_tile
         jsr blit_tile
+        ; Restore map bank after blitter changed it
+        lda #BANK_EN+BANK_MAP
+        sta VBXE_BANK_SEL
         jmp ?clean
 ?empty  ; Empty/invisible tile: restore sky background
         jsr blit_bg
+        ; Restore map bank after blitter changed it
+        lda #BANK_EN+BANK_MAP
+        sta VBXE_BANK_SEL
 
 ?clean  inc rd_idx
         inc r_col
         lda r_col
-        cmp #TILES_X
+        cmp rd_ecol
         bcc ?rcol
+        beq ?rcol               ; inclusive max
         inc r_row
         lda r_row
-        cmp #TILES_Y
-        bcc ?rrow
+        cmp rd_erow
+        beq ?last_row
+        bcs ?exit
+?last_row
+        jmp ?rrow
+?exit
         rts
 rd_idx  dta 0
+rd_scol dta 0
+rd_ecol dta 0
+rd_srow dta 0
+rd_erow dta 0
 .endp
 
 ; ============================================
@@ -197,11 +296,8 @@ rd_idx  dta 0
         asl
         asl
         sta md_cl
-        lda zdx
-        lsr                     ; zdx >> 4: lo byte contributes bits 0-3
-        lsr
-        lsr
-        lsr
+        ldx zdx
+        lda div16_lut,x         ; zdx / 16 via LUT
         ora md_cl               ; combine into tile column
         sta md_cl
 
@@ -220,26 +316,20 @@ rd_idx  dta 0
         lda zt2
         sbc #0
         sta zt2
-        lda zt2                 ; same pixel-to-tile formula
+        lda zt2                 ; same pixel-to-tile formula for hi byte
         asl
         asl
         asl
         asl
         sta md_cr
-        lda zt
-        lsr
-        lsr
-        lsr
-        lsr
+        ldx zt
+        lda div16_lut,x         ; zt / 16 via LUT
         ora md_cr
         sta md_cr
 
         ; --- Top row = Y / 16 ---
-        lda zdy
-        lsr
-        lsr
-        lsr
-        lsr
+        ldx zdy
+        lda div16_lut,x         ; zdy / 16 via LUT
         sta md_rt
 
         ; --- Bottom row = (Y + height - 1) / 16 ---
@@ -248,10 +338,8 @@ rd_idx  dta 0
         adc md_h
         sec
         sbc #1
-        lsr
-        lsr
-        lsr
-        lsr
+        tax
+        lda div16_lut,x         ; (zdy+md_h-1) / 16 via LUT
         sta md_rb
 
         ; --- Clamp to screen bounds ---
@@ -276,6 +364,50 @@ rd_idx  dta 0
         lda #TILES_Y-1
         sta md_rb
 ?rb_ok
+        ; --- Update per-buffer scan bbox ---
+        lda zbuf_hi
+        bne ?sb1
+        ; Buffer 0
+        lda #1
+        sta scan_any_0
+        lda md_cl
+        cmp scan_min_col_0
+        bcs ?s0a
+        sta scan_min_col_0
+?s0a    lda md_cr
+        cmp scan_max_col_0
+        bcc ?s0b
+        sta scan_max_col_0
+?s0b    lda md_rt
+        cmp scan_min_row_0
+        bcs ?s0c
+        sta scan_min_row_0
+?s0c    lda md_rb
+        cmp scan_max_row_0
+        bcc ?s0d
+        sta scan_max_row_0
+?s0d    jmp ?mark_tiles
+?sb1    ; Buffer 1
+        lda #1
+        sta scan_any_1
+        lda md_cl
+        cmp scan_min_col_1
+        bcs ?s1a
+        sta scan_min_col_1
+?s1a    lda md_cr
+        cmp scan_max_col_1
+        bcc ?s1b
+        sta scan_max_col_1
+?s1b    lda md_rt
+        cmp scan_min_row_1
+        bcs ?s1c
+        sta scan_min_row_1
+?s1c    lda md_rb
+        cmp scan_max_row_1
+        bcc ?s1d
+        sta scan_max_row_1
+?s1d
+?mark_tiles
         ; --- Mark tiles in rectangle [md_cl..md_cr] x [md_rt..md_rb] ---
         lda md_rt
         sta md_r

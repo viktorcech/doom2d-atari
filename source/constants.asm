@@ -61,6 +61,8 @@ SFX_SGTATK     = 31
 
 TILE_SWITCH_OFF = 28
 TILE_SWITCH_ON  = 29
+TILE_EXIT_SW_OFF = 30
+TILE_EXIT_SW_ON  = 31
 
 ; --- Switch target system ---
 MAX_SWITCHES    = 4
@@ -69,6 +71,7 @@ SW_ACT_WALL     = 1             ; remove wall (hidden area)
 SW_ACT_ELEV     = 2             ; call elevator (future)
 SW_ACT_DOOR_LOCK = 3            ; pickup opens door (spacebar locked)
 SW_ACT_FLOOR    = 4             ; floor trigger opens door (step on tile)
+SW_ACT_EXIT     = 5             ; exit switch — advance to next level
 
 ; --- VBXE registers ---
 VBXE_VCTL       = $D640

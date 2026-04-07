@@ -9,68 +9,62 @@
 ; Input: proj_x[zt], proj_y[zt] via X index in zt
 ; ============================================
 .proc check_proj_enemies
-        lda zt
-        sta cp_proj
-        lda #0
-        sta cp_eidx
-?lp     ldx cp_eidx
-        lda en_act,x
-        cmp #1              ; only alive enemies (skip dead=0 and dying=2)
+        ; Y = projectile index (kept in Y throughout hot path)
+        ; X = enemy index (kept in X throughout hot path)
+        ldy zt                  ; Y = proj index
+        ldx #0                  ; X = enemy index
+?lp     lda en_act,x
+        cmp #1                  ; only alive enemies
         beq ?chk
         jmp ?nxe
 ?chk    ; --- X distance (16-bit) ---
-        ldx cp_proj
-        lda proj_x,x
+        ; Y=proj, X=enemy — no register swapping needed
+        lda proj_x,y
         sec
-        ldx cp_eidx
         sbc en_x,x
-        sta cp_tmp          ; dist low
-        ldx cp_proj
-        lda proj_xh,x
-        ldx cp_eidx
+        sta zcp_tmp             ; dist low
+        lda proj_xh,y
         sbc enxhi,x
-        sta cp_tmph          ; dist high (signed)
+        sta zcp_tmph            ; dist high (signed)
         ; Absolute value
         bpl ?xpos
-        lda cp_tmp
+        lda zcp_tmp
         eor #$FF
         clc
         adc #1
-        sta cp_tmp
-        lda cp_tmph
+        sta zcp_tmp
+        lda zcp_tmph
         eor #$FF
         adc #0
-        sta cp_tmph
-?xpos   lda cp_tmph
+        sta zcp_tmph
+?xpos   lda zcp_tmph
         beq ?xnear
-        jmp ?nxe            ; hi != 0 -> too far
-?xnear  lda cp_tmp
-        cmp #14             ; within 14px X
+        jmp ?nxe                ; hi != 0 -> too far
+?xnear  lda zcp_tmp
+        cmp #14                 ; within 14px X
         bcc ?ychk
         jmp ?nxe
 ?ychk   ; --- Y distance ---
-        ldx cp_proj
-        lda proj_y,x
+        lda proj_y,y
         sec
-        ldx cp_eidx
         sbc en_y,x
         bpl ?ypos
         eor #$FF
         clc
         adc #1
-?ypos   cmp #28             ; within 28px Y
+?ypos   cmp #28                 ; within 28px Y
         bcc ?hit
         jmp ?nxe
 ?hit    ; --- HIT! ---
+        ; Save X/Y for subroutine calls (hit path is rare)
+        stx zcp_eidx
+        sty zcp_proj
         ; Apply damage
-        ldx cp_proj
-        lda proj_dmg,x
-        ldx cp_eidx
-        ; Subtract from HP
-        sta cp_tmp          ; damage amount
+        lda proj_dmg,y
+        sta zcp_tmp             ; damage amount
         lda en_hp,x
         sec
-        sbc cp_tmp
+        sbc zcp_tmp
         bcc ?kill
         beq ?kill
         sta en_hp,x
@@ -78,11 +72,9 @@
         lda #6
         sta en_pain_tmr,x
         ; Knockback from hit (use proj_vx direction)
-        ldx cp_proj
-        lda proj_vx,x
-        ldx cp_eidx
+        lda proj_vx,y
         bmi ?kb_l
-        ; Knockback right (projectile going right)
+        ; Knockback right
         lda envelx,x
         clc
         adc #2
@@ -90,7 +82,7 @@
         bcc ?kb_s
         lda #4
         jmp ?kb_s
-?kb_l   ; Knockback left (projectile going left)
+?kb_l   ; Knockback left
         lda envelx,x
         sec
         sbc #2
@@ -98,25 +90,24 @@
         bcs ?kb_s
         lda #$FC
 ?kb_s   sta envelx,x
-        ; Play pain sound
+        ; Play pain sound (clobbers X/Y)
         lda #SFX_OOF
         jsr play_sfx_unlock
         ; Destroy projectile
-        ldx cp_proj
+        ldy zcp_proj
         lda #0
-        sta proj_a,x
-        sec              ; hit
+        sta proj_a,y
+        sec                     ; hit
         rts
-?kill   ; Enemy killed!
-        ldx cp_eidx
-        jsr start_enemy_death
+?kill   ; Enemy killed! (X=enemy, Y=proj still valid here)
+        jsr start_enemy_death   ; X=enemy index (clobbers regs)
         ; Knockback velocity for gib (rocket + weak enemy only)
-        ldx cp_proj
-        lda proj_spr,x
-        cmp #SPR_ROCKET_PROJ     ; rocket?
+        ldy zcp_proj
+        lda proj_spr,y
+        cmp #SPR_ROCKET_PROJ
         bne ?no_gib
         ; Only zombie, imp, shotgun guy can gib
-        ldx cp_eidx
+        ldx zcp_eidx
         lda en_type,x
         cmp #EN_ZOMBIE
         beq ?do_gib
@@ -124,55 +115,51 @@
         beq ?do_gib
         cmp #EN_SHOTGUN
         beq ?do_gib
-        jmp ?no_gib              ; pinky/caco/baron = normal death
-?do_gib ldx cp_eidx
+        jmp ?no_gib
+?do_gib ldx zcp_eidx
         lda #1
         sta en_gib,x
-        ldx cp_proj
-        lda proj_vx,x       ; A = proj direction (signed)
-        bmi ?gib_l           ; check sign BEFORE ldx clobbers N flag
-        ldx cp_eidx
-        lda #8              ; right knockback
+        lda proj_vx,y           ; Y still = proj
+        bmi ?gib_l
+        ldx zcp_eidx
+        lda #8
         sta envelx,x
         jmp ?gib_vy
-?gib_l  ldx cp_eidx
-        lda #$F8            ; left knockback (-8)
+?gib_l  ldx zcp_eidx
+        lda #$F8
         sta envelx,x
-?gib_vy lda #$F4            ; upward velocity (-12)
+?gib_vy lda #$F4
         sta envely,x
-        ; Gib sound (splat)
+        ; Gib sound (clobbers regs)
         lda #SFX_SLOP
         jsr play_sfx_unlock
         jmp ?kill_done
-?no_gib ldx cp_eidx
+?no_gib ldx zcp_eidx
         lda #0
         sta envely,x
-        ; Death sound
+        ; Death sound (clobbers regs)
         jsr play_enemy_death
 ?kill_done
         ; Destroy projectile + splash if rocket
-        ldx cp_proj
-        lda proj_spr,x
+        ldy zcp_proj
+        lda proj_spr,y
         cmp #SPR_ROCKET_PROJ
         bne ?nosplash
         jsr rocket_splash_player
-        ldx cp_proj
+        ldy zcp_proj
 ?nosplash
         lda #0
-        sta proj_a,x
-        sec              ; hit
+        sta proj_a,y
+        sec                     ; hit
         rts
-?nxe    inc cp_eidx
-        lda cp_eidx
-        cmp #MAX_ENEMIES
+?nxe    inx
+        cpx #MAX_ENEMIES
         bcs ?miss
         jmp ?lp
-?miss   clc              ; no hit
+?miss   clc                     ; no hit
         rts
-cp_proj dta 0
-cp_eidx dta 0
-cp_tmp  dta 0
-cp_tmph dta 0
+; zcp_proj, zcp_eidx used only in hit path (rare)
+; zcp_tmp, zcp_tmph used in distance calc
 .endp
 
 ; Turn counter for stuck detection

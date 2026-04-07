@@ -105,12 +105,22 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         beq ?no_pdec
         dec en_pain_tmr,x
 ?no_pdec
-        ; --- LOS check: skip every 2nd frame per enemy ---
+        ; --- LOS check: stagger per enemy ---
+        ; Alerted: every 2nd frame. Idle: every 4th frame.
         lda zfr
-        eor zzidx              ; stagger: different enemies check different frames
-        and #$01
+        eor zzidx
+        sta zt
+        lda en_cooldown,x
+        bne ?alert_stagger
+        lda zt
+        and #$03              ; idle: 1 of 4 frames
         beq ?do_los
-        jmp ?grav              ; skip frame: just gravity, no movement
+        jmp ?grav
+?alert_stagger
+        lda zt
+        and #$01              ; alerted: 1 of 2 frames
+        beq ?do_los
+        jmp ?grav
 ?do_los
         ; If alerted and falling, skip LOS and keep chasing
         ; (prevents cycling on stairs when chest-height row changes)
@@ -247,7 +257,7 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         adc los_end
         sta los_pcol
 
-        ; Scan ALL tiles between player and enemy (inclusive endpoints)
+        ; Scan tiles between player and enemy (inclusive endpoints)
         lda los_ecol
         cmp los_pcol
         beq ?h_clear        ; same column = visible

@@ -17,6 +17,23 @@ sw_timer        :MAX_SWITCHES dta 0
 sw_found_col    dta 0
 sw_found_row    dta 0
 
+; Helper: is tile A a switch-OFF tile? (Z=1 if yes)
+; Returns: Z flag, preserves A
+.proc is_any_sw_off
+        cmp #TILE_SWITCH_OFF
+        beq ?yes
+        cmp #TILE_EXIT_SW_OFF
+?yes    rts
+.endp
+
+; Helper: is tile A a switch-ON tile? (Z=1 if yes)
+.proc is_any_sw_on
+        cmp #TILE_SWITCH_ON
+        beq ?yes
+        cmp #TILE_EXIT_SW_ON
+?yes    rts
+.endp
+
 ; TRY USE SWITCH - check tiles around player for switch (OFF or ON)
 ; Called when USE pressed and no door found
 .proc try_use_switch
@@ -31,10 +48,10 @@ sw_found_row    dta 0
         lda zpy
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?r1
         jmp ?found_off
-?r1     cmp #TILE_SWITCH_ON
+?r1     jsr is_any_sw_on
         bne ?r2
         jmp ?found_on
 ?r2     ; Check left side: player center X - 8
@@ -48,10 +65,10 @@ sw_found_row    dta 0
         lda zpy
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?l1
         jmp ?found_off
-?l1     cmp #TILE_SWITCH_ON
+?l1     jsr is_any_sw_on
         bne ?l2
         jmp ?found_on
 ?l2     ; Check head height right
@@ -67,10 +84,10 @@ sw_found_row    dta 0
         sbc #16
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?hr1
         jmp ?found_off
-?hr1    cmp #TILE_SWITCH_ON
+?hr1    jsr is_any_sw_on
         bne ?hr2
         jmp ?found_on
 ?hr2    ; Check head height left
@@ -86,10 +103,10 @@ sw_found_row    dta 0
         sbc #16
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?hl1
         jmp ?found_off
-?hl1    cmp #TILE_SWITCH_ON
+?hl1    jsr is_any_sw_on
         bne ?hl2
         jmp ?found_on
 ?hl2    ; Check at player feet (standing on switch)
@@ -100,10 +117,10 @@ sw_found_row    dta 0
         lda zpy
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?f1
         jmp ?found_off
-?f1     cmp #TILE_SWITCH_ON
+?f1     jsr is_any_sw_on
         bne ?f2
         jmp ?found_on
 ?f2     ; Check at player head (overlapping switch above)
@@ -116,10 +133,10 @@ sw_found_row    dta 0
         sbc #16
         sta gt_py
         jsr get_tile_at
-        cmp #TILE_SWITCH_OFF
+        jsr is_any_sw_off
         bne ?nope
         jmp ?found_off
-?nope   cmp #TILE_SWITCH_ON
+?nope   jsr is_any_sw_on
         bne ?oof
         jmp ?found_on
 ?oof    ; No switch found — play OOF
@@ -127,16 +144,20 @@ sw_found_row    dta 0
         jsr snd_play
         rts
 ?found_off
-        ; Toggle switch OFF -> ON
+        ; Toggle switch OFF -> ON (A = current tile from get_tile_at)
+        pha                     ; save original tile ID for exit check
         ldy #0
-        lda #TILE_SWITCH_ON
+        clc
+        adc #1              ; OFF+1 = ON for both types (28→29, 30→31)
         sta (ztptr),y
         ldx #SFX_SWTCHN        ; switch ON sound
         jmp ?do_action
 ?found_on
         ; Toggle switch ON -> OFF
+        pha                     ; save original tile ID
         ldy #0
-        lda #TILE_SWITCH_OFF
+        sec
+        sbc #1              ; ON-1 = OFF for both types (29→28, 31→30)
         sta (ztptr),y
         ldx #SFX_SWTCHX        ; switch OFF sound
 ?do_action
@@ -153,10 +174,19 @@ sw_found_row    dta 0
         jsr play_sfx_unlock
         lda #8
         sta snd_lock            ; lock to prevent door sound overriding
-        ; Set auto-off timer for this switch
+        ; Exit switch? (tile 30 or 31 = exit type, no table entry needed)
+        pla                     ; restore original tile ID
+        cmp #TILE_EXIT_SW_OFF
+        beq ?do_exit
+        cmp #TILE_EXIT_SW_ON
+        beq ?do_exit
+        ; Normal switch — look up in table
         jsr sw_set_timer
-        ; Look up switch in table and execute action
         jsr switch_do_target
+        rts
+?do_exit
+        lda #1
+        sta level_complete
         rts
 sw_sfx_tmp dta 0
 .endp
@@ -173,7 +203,36 @@ sw_sfx_tmp dta 0
         lda #1
         sta dirty_0,y
         sta dirty_1,y
-        rts
+        ; Update scan bbox for both buffers
+        sta scan_any_0
+        sta scan_any_1
+        lda gt_col
+        cmp scan_min_col_0
+        bcs ?a0
+        sta scan_min_col_0
+?a0     sta scan_min_col_1
+        lda gt_col
+        cmp scan_max_col_0
+        bcc ?b0
+        sta scan_max_col_0
+?b0     cmp scan_max_col_1
+        bcc ?c0
+        sta scan_max_col_1
+?c0     lda gt_row
+        cmp scan_min_row_0
+        bcs ?d0
+        sta scan_min_row_0
+?d0     cmp scan_min_row_1
+        bcs ?e0
+        sta scan_min_row_1
+?e0     lda gt_row
+        cmp scan_max_row_0
+        bcc ?f0
+        sta scan_max_row_0
+?f0     cmp scan_max_row_1
+        bcc ?g0
+        sta scan_max_row_1
+?g0     rts
 .endp
 
 ; ============================================
@@ -258,6 +317,8 @@ idsw_door dta 0
         beq ?act_door
         cmp #SW_ACT_WALL
         beq ?act_wall
+        cmp #SW_ACT_EXIT
+        beq ?act_exit
         ; Default / SW_ACT_ELEV: future
         rts
 ?act_door
@@ -287,6 +348,11 @@ idsw_door dta 0
         ; Play switch sound
         ldx #SFX_SWTCHX
         jsr snd_play
+        rts
+?act_exit
+        ; Exit switch — set level_complete flag
+        lda #1
+        sta level_complete
         rts
 .endp
 
@@ -430,9 +496,10 @@ ft_cur_row dta 0
         sta ztptr+1
         ldy sw_col,x
         lda (ztptr),y
-        cmp #TILE_SWITCH_ON
+        jsr is_any_sw_on
         bne ?skip               ; not ON, skip
-        lda #TILE_SWITCH_OFF
+        sec
+        sbc #1              ; ON-1 = OFF (29→28, 31→30)
         sta (ztptr),y
         ; Mark dirty for redraw
         ldx us_idx

@@ -216,6 +216,7 @@ pl_pain_timer dta 0
         and #$FE
         sta POKMSK
         sta IRQEN
+        jsr load_level
         jsr init_game
         jsr init_render
         lda #$FF
@@ -241,16 +242,28 @@ BFG_BLAST_DMG = 20
 
 .proc bfg_blast
         stx bf_proj
+        ; Check once: is proj inside a solid tile? (wall/door hit)
+        lda proj_x,x
+        sta gt_px
+        lda proj_xh,x
+        sta gt_px_hi
+        lda proj_y,x
+        sta gt_py
+        jsr check_solid
+        sta bf_wall             ; 0 = open air, !0 = in wall
         ldy #0
 ?lp     sty bf_eidx
         lda en_act,y
         cmp #1
-        bne ?nx
-        ; Check same hi byte
+        beq ?alive
+        jmp ?nx
+?alive  ; Check same hi byte
         ldx bf_proj
         lda proj_xh,x
         cmp enxhi,y
-        bne ?nx
+        beq ?xhi_ok
+        jmp ?nx
+?xhi_ok
         ; X distance
         lda proj_x,x
         sec
@@ -260,8 +273,9 @@ BFG_BLAST_DMG = 20
         clc
         adc #1
 ?xa     cmp #BFG_RADIUS
-        bcs ?nx
-        ; Y distance
+        bcc ?xok
+        jmp ?nx
+?xok    ; Y distance
         ldx bf_proj
         lda proj_y,x
         sec
@@ -271,7 +285,25 @@ BFG_BLAST_DMG = 20
         clc
         adc #1
 ?ya     cmp #BFG_RADIUS
-        bcs ?nx
+        bcc ?yok
+        jmp ?nx
+?yok    ; LOS: if proj hit wall, block enemies behind it
+        lda bf_wall
+        beq ?los_ok             ; proj in open air, blast always hits
+        ldx bf_proj
+        lda proj_vx,x
+        bmi ?chk_left
+        ; Proj going right: only hit enemies LEFT of proj (near side)
+        lda en_x,y
+        cmp proj_x,x
+        bcs ?los_blocked        ; enemy X >= proj X = behind wall
+        jmp ?los_ok
+?chk_left
+        ; Proj going left: only hit enemies RIGHT of proj (near side)
+        lda proj_x,x
+        cmp en_x,y
+        bcs ?los_blocked        ; proj X >= enemy X = behind wall
+?los_ok ldy bf_eidx
         ; Hit! Apply BFG damage
         lda en_hp,y
         sec
@@ -293,14 +325,20 @@ BFG_BLAST_DMG = 20
         tax
         jsr play_enemy_death
         ldy bf_eidx
+        jmp ?nx
+?los_blocked
+        ldy bf_eidx
 ?nx     ldy bf_eidx
         iny
         cpy #MAX_ENEMIES
-        bne ?lp
+        beq ?done
+        jmp ?lp
+?done
         ldx bf_proj
         rts
 bf_proj dta 0
 bf_eidx dta 0
+bf_wall dta 0
 .endp
 
 ; ============================================

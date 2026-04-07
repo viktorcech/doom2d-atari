@@ -169,13 +169,67 @@ ic_bank dta 0
 .endp
 
 ; ============================================
-; RUN_BLIT - Start VBXE blitter using BCB at VRAM $07F100
+; CLEAR_FULL_BLACK - Fill entire 320x200 buffer with black (0)
+; Uses current zbuf_hi for buffer select.
+; ============================================
+.proc clear_full_black
+        jsr wait_blit
+        lda #BANK_EN+BANK_BCB
+        sta VBXE_BANK_SEL
+        ; src = 0 (fill with AND=0)
+        lda #0
+        sta MEMW+[VRAM_BCB&$FFF]+0
+        sta MEMW+[VRAM_BCB&$FFF]+1
+        sta MEMW+[VRAM_BCB&$FFF]+2
+        sta MEMW+[VRAM_BCB&$FFF]+3
+        sta MEMW+[VRAM_BCB&$FFF]+4
+        sta MEMW+[VRAM_BCB&$FFF]+5
+        sta MEMW+[VRAM_BCB&$FFF]+15  ; AND = 0
+        sta MEMW+[VRAM_BCB&$FFF]+16  ; XOR = 0
+        sta MEMW+[VRAM_BCB&$FFF]+17
+        sta MEMW+[VRAM_BCB&$FFF]+18
+        sta MEMW+[VRAM_BCB&$FFF]+19
+        sta MEMW+[VRAM_BCB&$FFF]+20  ; mode 0 (fill)
+        ; dst = buffer start
+        lda #0
+        sta MEMW+[VRAM_BCB&$FFF]+6
+        sta MEMW+[VRAM_BCB&$FFF]+7
+        lda zbuf_hi
+        sta MEMW+[VRAM_BCB&$FFF]+8
+        ; dst step = 320
+        lda #<SCR_W
+        sta MEMW+[VRAM_BCB&$FFF]+9
+        lda #>SCR_W
+        sta MEMW+[VRAM_BCB&$FFF]+10
+        lda #1
+        sta MEMW+[VRAM_BCB&$FFF]+11
+        ; size = 320x200
+        lda #<[SCR_W-1]
+        sta MEMW+[VRAM_BCB&$FFF]+12
+        lda #>[SCR_W-1]
+        sta MEMW+[VRAM_BCB&$FFF]+13
+        lda #SCR_H-1
+        sta MEMW+[VRAM_BCB&$FFF]+14
+        jsr run_blit
+        jsr wait_blit
+        ; Restore normal BCB state
+        lda #BANK_EN+BANK_BCB
+        sta VBXE_BANK_SEL
+        lda #$FF
+        sta MEMW+[VRAM_BCB&$FFF]+15  ; AND = $FF
+        lda #0
+        sta MEMW+[VRAM_BCB&$FFF]+16
+        lda #BLT_TRANS
+        sta MEMW+[VRAM_BCB&$FFF]+20
+        rts
+.endp
+
+; ============================================
+; RUN_BLIT - Start VBXE blitter (no wait — caller must ensure idle)
 ; BCB must be fully configured before calling.
 ; Returns immediately — CPU continues while blitter runs.
-; Call wait_blit before next blit or BCB modification.
 ; ============================================
 .proc run_blit
-        jsr wait_blit           ; ensure previous blit finished
         lda #$00                ; BCB address = $07F100
         sta VBXE_BL_ADR0       ;   lo
         lda #$F1
@@ -235,6 +289,10 @@ is_pal  dta 0
         beq ?draw_bg
         cmp #TILE_SWITCH_ON
         beq ?draw_bg
+        cmp #TILE_EXIT_SW_OFF
+        beq ?draw_bg
+        cmp #TILE_EXIT_SW_ON
+        beq ?draw_bg
         jmp ?normal
 ?draw_bg
         ; First: draw sky background section at this tile position
@@ -245,6 +303,7 @@ is_pal  dta 0
         sta r_tile          ; restore original tile
         ; Then: draw platform with BLT_TRANS (below, mode set at end)
 ?normal
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         lda #0
@@ -319,6 +378,10 @@ is_pal  dta 0
         beq ?trans
         cmp #TILE_SWITCH_ON
         beq ?trans
+        cmp #TILE_EXIT_SW_OFF
+        beq ?trans
+        cmp #TILE_EXIT_SW_ON
+        beq ?trans
         lda #0              ; BLT_COPY (opaque)
         beq ?setm
 ?trans  lda #BLT_TRANS      ; transparent (skip index 0)
@@ -381,7 +444,8 @@ is_pal  dta 0
 ?bclip_ok
         sta bs_h
 ?no_bclip
-        ; --- Configure BCB and blit ---
+        ; --- Wait for previous blit, then configure BCB ---
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         ; Source VRAM address from lookup tables
@@ -437,6 +501,7 @@ bs_h    dta 0
 ; src = sky VRAM at $034000 + r_row*5120 + r_col*16
 ; ============================================
 .proc blit_bg
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         ; Source: background VRAM at bg_row[r_row] + r_col*16

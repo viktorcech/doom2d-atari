@@ -39,6 +39,7 @@ hd_d2   dta 0                   ; hundreds digit
         ; Calculate source: $019000 + A*64
         ; A*64: shift left 6 = high nybble is A>>2, low byte is (A&3)<<6
         sta hc_idx
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
 
@@ -151,6 +152,7 @@ hud_xpos dta 0
         sta zdx
         lda #0
         sta zdxh
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         lda #$00
@@ -175,7 +177,8 @@ hud_xpos dta 0
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+13
         lda #7
-        sta MEMW+[VRAM_BCB&$FFF]+14
+        sta MEMW+[VRAM_BCB&$FFF]+14  ; height-1 = 7
+        lda #0
         sta MEMW+[VRAM_BCB&$FFF]+15  ; AND=0 → black
         sta MEMW+[VRAM_BCB&$FFF]+20  ; mode=0
         jsr run_blit
@@ -357,6 +360,7 @@ hud_xpos dta 0
 ; Uses blitter AND=0 to force all pixels black
 ; ============================================
 .proc hud_clear_icon
+        jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         ; src = $00FA00 (known zeros)
@@ -386,10 +390,10 @@ hud_xpos dta 0
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+13
         lda #7
-        sta MEMW+[VRAM_BCB&$FFF]+14
-        ; AND=0 forces black (override pre-filled $FF)
-        sta MEMW+[VRAM_BCB&$FFF]+15
-        sta MEMW+[VRAM_BCB&$FFF]+20
+        sta MEMW+[VRAM_BCB&$FFF]+14  ; height-1 = 7
+        lda #0
+        sta MEMW+[VRAM_BCB&$FFF]+15  ; AND=0 → black
+        sta MEMW+[VRAM_BCB&$FFF]+20  ; mode=0
         jsr run_blit
         ; Restore AND=$FF for next blit
         lda #$FF

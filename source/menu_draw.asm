@@ -4,7 +4,7 @@
 ;==============================================
 
 ; ============================================
-; BACKUP MENU AREA (184x64 from screen to VRAM $070000)
+; BACKUP MENU AREA (184x80 from screen to VRAM $070000)
 ; ============================================
 .proc backup_menu_area
         lda #BANK_EN+BANK_BCB
@@ -44,7 +44,7 @@
         sta MEMW+[VRAM_BCB&$FFF]+12
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #63
+        lda #87
         sta MEMW+[VRAM_BCB&$FFF]+14
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+20
@@ -104,7 +104,7 @@
         sta MEMW+[VRAM_BCB&$FFF]+12
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #63
+        lda #87
         sta MEMW+[VRAM_BCB&$FFF]+14
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+20  ; mode 0 (copy)
@@ -201,7 +201,7 @@ dt_y    dta 0
         sta zdxh
         lda #11
         jsr blit_hud_char
-        ; NEW GAME
+        ; Item 0: NEW GAME
         lda #<txt_newgame
         sta txt_ptr
         lda #>txt_newgame
@@ -213,7 +213,7 @@ dt_y    dta 0
         lda #MENU_Y
         sta zdy
         jsr draw_text
-        ; SETTINGS
+        ; Item 1: SETTINGS
         lda #<txt_settings
         sta txt_ptr
         lda #>txt_settings
@@ -225,7 +225,49 @@ dt_y    dta 0
         lda #MENU_Y+MENU_SPACE
         sta zdy
         jsr draw_text
-        ; CREDITS
+        ; Item 2: SAVE (pause only) or LOAD (title)
+        lda menu_mode
+        beq ?title_skip_save
+        ; Pause: draw SAVE at slot 2
+        lda #<txt_save
+        sta txt_ptr
+        lda #>txt_save
+        sta txt_ptr+1
+        lda #MENU_X
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #MENU_Y+MENU_SPACE*2
+        sta zdy
+        jsr draw_text
+        ; Pause: LOAD at slot 3
+        lda #<txt_load
+        sta txt_ptr
+        lda #>txt_load
+        sta txt_ptr+1
+        lda #MENU_X
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #MENU_Y+MENU_SPACE*3
+        sta zdy
+        jsr draw_text
+        jmp ?draw_credits
+?title_skip_save
+        ; Title: LOAD at slot 2 (no SAVE)
+        lda #<txt_load
+        sta txt_ptr
+        lda #>txt_load
+        sta txt_ptr+1
+        lda #MENU_X
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #MENU_Y+MENU_SPACE*2
+        sta zdy
+        jsr draw_text
+?draw_credits
+        ; Item: CREDITS
         lda #<txt_credits
         sta txt_ptr
         lda #>txt_credits
@@ -234,7 +276,13 @@ dt_y    dta 0
         sta zdx
         lda #0
         sta zdxh
-        lda #MENU_Y+MENU_SPACE*2
+        lda menu_mode
+        bne ?cr_pause
+        lda #MENU_Y+MENU_SPACE*3   ; title: slot 3
+        jmp ?cr_draw
+?cr_pause
+        lda #MENU_Y+MENU_SPACE*4   ; pause: slot 4
+?cr_draw
         sta zdy
         jsr draw_text
         rts
@@ -308,8 +356,15 @@ dt_y    dta 0
         lda um_prev
         and #J_DOWN
         bne ?no_jdn
+        lda menu_mode
+        bne ?max5
         lda menu_sel
-        cmp #MENU_ITEMS-1
+        cmp #MENU_ITEMS-2       ; title: 4 items (0-3)
+        bcs ?no_jdn
+        inc menu_sel
+        jmp ?no_jdn
+?max5   lda menu_sel
+        cmp #MENU_ITEMS-1       ; pause: 5 items (0-4)
         bcs ?no_jdn
         inc menu_sel
 ?no_jdn lda um_joy
@@ -342,7 +397,14 @@ dt_y    dta 0
         jmp ?done
 ?kdn    lda #$FF
         sta $02FC
+        lda menu_mode
+        bne ?kmax5
         lda menu_sel
+        cmp #MENU_ITEMS-2
+        bcs ?done
+        inc menu_sel
+        jmp ?done
+?kmax5  lda menu_sel
         cmp #MENU_ITEMS-1
         bcs ?done
         inc menu_sel
@@ -385,7 +447,7 @@ um_prev dta 0
         sta MEMW+[VRAM_BCB&$FFF]+12
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #63
+        lda #87
         sta MEMW+[VRAM_BCB&$FFF]+14
         jsr run_blit
         jsr wait_blit
@@ -405,6 +467,8 @@ um_prev dta 0
 ; ============================================
 txt_newgame dta c'NEW GAME',0
 txt_settings dta c'SETTINGS',0
+txt_save dta c'SAVE    ',0
+txt_load dta c'LOAD    ',0
 txt_credits dta c'CREDITS ',0
 txt_snd_lbl dta c'SOUND   ',0
 txt_on  dta c'ON      ',0

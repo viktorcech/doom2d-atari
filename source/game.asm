@@ -29,27 +29,21 @@
 ; Output: A = tile index from map
 ; ============================================
 .proc get_tile_at
-        ; tile_col = (gt_px_hi:gt_px) / 16
+        ; tile_col = (gt_px_hi:gt_px) / 16  (LUT replaces 4x LSR)
         lda gt_px_hi
         asl
         asl
         asl
         asl                 ; hi * 16 (0 or 16)
         sta gt_col
-        lda gt_px
-        lsr
-        lsr
-        lsr
-        lsr                 ; lo / 16
+        ldx gt_px
+        lda div16_lut,x     ; lo / 16 via LUT
         clc
         adc gt_col
         sta gt_col
         ; tile_row = gt_py / 16
-        lda gt_py
-        lsr
-        lsr
-        lsr
-        lsr
+        ldx gt_py
+        lda div16_lut,x     ; py / 16 via LUT
         sta gt_row
         ; bounds check
         lda gt_col
@@ -102,11 +96,8 @@ gt_tmp  dta 0
 ; Enemy tile col from en_x[X], enxhi[X] → A
 ; (does NOT add +8 center offset — caller does if needed)
 .proc get_enemy_tile_col
-        lda en_x,x
-        lsr
-        lsr
-        lsr
-        lsr
+        ldy en_x,x
+        lda div16_lut,y      ; en_x / 16 via LUT
         sta gt_tmp
         lda enxhi,x
         asl
@@ -119,11 +110,8 @@ gt_tmp  dta 0
 
 ; Player tile col from zpx, zpx_hi → A
 .proc get_player_tile_col
-        lda zpx
-        lsr
-        lsr
-        lsr
-        lsr
+        ldx zpx
+        lda div16_lut,x      ; zpx / 16 via LUT
         sta gt_tmp
         lda zpx_hi
         asl
@@ -148,10 +136,8 @@ gt_tmp  dta 0
         asl
         sta gt_tmp
         pla             ; restore low byte
-        lsr
-        lsr
-        lsr
-        lsr
+        tax
+        lda div16_lut,x  ; (zpx+8) / 16 via LUT
         ora gt_tmp
         rts
 .endp
@@ -192,6 +178,8 @@ tile_solid
         dta 1                ; 27 = door yellow (solid)
         dta 0                ; 28 = switch OFF (passable, on wall)
         dta 0                ; 29 = switch ON (passable, on wall)
+        dta 0                ; 30 = exit switch OFF (passable)
+        dta 0                ; 31 = exit switch ON (passable)
 
 ; ============================================
 ; ONE-WAY PLATFORM TABLE
@@ -217,6 +205,8 @@ tile_oneway
         dta 0                ; 27 = door yellow (not one-way)
         dta 0                ; 28 = switch OFF (not one-way)
         dta 0                ; 29 = switch ON (not one-way)
+        dta 0                ; 30 = exit switch OFF (not one-way)
+        dta 0                ; 31 = exit switch ON (not one-way)
 
 ; ============================================
 ; HALF-HEIGHT TILE TABLE
