@@ -49,6 +49,7 @@ TILE_MAP = {
     'Y': 23,  # FLOOR5_1 (one-way platform)
     'q': 24,  # MFLR8_1 (wall)
     '$': 28,  # switch OFF
+    'E': 30,  # exit switch OFF
 }
 
 # Entity characters -> (underlying tile, entity type)
@@ -260,22 +261,31 @@ def convert_map(input_path, output_bin, output_ent=None):
 
             etype_map = {'zombie': 0, 'imp': 1, 'pinky': 2, 'caco': 3, 'shotgun': 4, 'baron': 5}
 
+            MAX_ENEMIES = 6
             f.write("enemy_spawn_x\n")
             for col, row, etype, facing in enemies:
                 f.write(f"        dta a({col * 16})  ; {etype}\n")
+            for _ in range(MAX_ENEMIES - len(enemies)):
+                f.write("        dta a(0)\n")
 
             f.write("\nenemy_spawn_y\n")
             for col, row, etype, facing in enemies:
                 f.write(f"        dta {row * 16}  ; {etype}\n")
+            for _ in range(MAX_ENEMIES - len(enemies)):
+                f.write("        dta 0\n")
 
             f.write("\nenemy_spawn_type\n")
             for col, row, etype, facing in enemies:
                 f.write(f"        dta {etype_map.get(etype, 0)}  ; {etype}\n")
+            for _ in range(MAX_ENEMIES - len(enemies)):
+                f.write("        dta 0\n")
 
             f.write("\nenemy_spawn_dir\n")
             for col, row, etype, facing in enemies:
                 ds = "left" if facing else "right"
                 f.write(f"        dta {facing}  ; {etype} {ds}\n")
+            for _ in range(MAX_ENEMIES - len(enemies)):
+                f.write("        dta 0\n")
 
             # Pickup spawns (all collectible items)
             pickup_types = ('health', 'ammo', 'medikit', 'greenarmor', 'bluearmor',
@@ -294,31 +304,32 @@ def convert_map(input_path, output_bin, output_ent=None):
                         'plasmagun': 15, 'cells': 16, 'bfgpk': 17, 'rocket1': 18,
                         'healthbonus': 19, 'armorbonus': 20}
 
+            MAX_PICKUPS = 12
             f.write("pickup_spawn_x\n")
             for col, row, ptype, _ in pickups:
                 px = col * 16
                 f.write(f"        dta {px & 255}  ; {ptype}\n")
-            if not pickups:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_PICKUPS - len(pickups)):
+                f.write("        dta 0\n")
 
             f.write("\npickup_spawn_xhi\n")
             for col, row, ptype, _ in pickups:
                 px = col * 16
                 f.write(f"        dta {px >> 8}  ; {ptype}\n")
-            if not pickups:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_PICKUPS - len(pickups)):
+                f.write("        dta 0\n")
 
             f.write("\npickup_spawn_y\n")
             for col, row, ptype, _ in pickups:
                 f.write(f"        dta {row * 16}  ; {ptype}\n")
-            if not pickups:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_PICKUPS - len(pickups)):
+                f.write("        dta 0\n")
 
             f.write("\npickup_spawn_type\n")
             for col, row, ptype, _ in pickups:
                 f.write(f"        dta {ptype_map.get(ptype, 0)}  ; {ptype}\n")
-            if not pickups:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_PICKUPS - len(pickups)):
+                f.write("        dta 0\n")
 
             # Decoration spawns
             decor_types = ('barrel', 'torch', 'pillar', 'lamp', 'deadguy')
@@ -328,31 +339,32 @@ def convert_map(input_path, output_bin, output_ent=None):
             dtype_map = {'barrel': 0, 'torch': 1, 'pillar': 2,
                         'lamp': 3, 'deadguy': 4}
 
+            MAX_DECOR = 8
             f.write("decor_spawn_x\n")
             for col, row, dtype, _ in decors:
                 px = col * 16
                 f.write(f"        dta {px & 255}  ; {dtype}\n")
-            if not decors:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_DECOR - len(decors)):
+                f.write("        dta 0\n")
 
             f.write("\ndecor_spawn_xhi\n")
             for col, row, dtype, _ in decors:
                 px = col * 16
                 f.write(f"        dta {px >> 8}  ; {dtype}\n")
-            if not decors:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_DECOR - len(decors)):
+                f.write("        dta 0\n")
 
             f.write("\ndecor_spawn_y\n")
             for col, row, dtype, _ in decors:
                 f.write(f"        dta {row * 16}  ; {dtype}\n")
-            if not decors:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_DECOR - len(decors)):
+                f.write("        dta 0\n")
 
             f.write("\ndecor_spawn_type\n")
             for col, row, dtype, _ in decors:
                 f.write(f"        dta {dtype_map.get(dtype, 0)}  ; {dtype}\n")
-            if not decors:
-                f.write("        dta 0  ; placeholder\n")
+            for _ in range(MAX_DECOR - len(decors)):
+                f.write("        dta 0\n")
 
             # Switch target links
             # Auto-detect source type for door action:
@@ -373,6 +385,14 @@ def convert_map(input_path, output_bin, output_ent=None):
                         print(f"  Auto: link ({sc},{sr}) source='{src_ch}' -> door_lock")
             act_map['door_lock'] = 3
             act_map['floor'] = 4
+            act_map['exit'] = 5
+            for s in switch_links:
+                if s['action'] in ('door', 'floor', 'door_lock'):
+                    sr, sc = s['row'], s['col']
+                    if sr < len(map_lines) and sc < len(map_lines[sr]):
+                        if map_lines[sr][sc] == 'E':
+                            s['action'] = 'exit'
+                            print(f"  Auto: link ({sc},{sr}) exit switch")
             max_sw = 4
             num_sw = min(len(switch_links), max_sw)
             if len(switch_links) > max_sw:
@@ -423,6 +443,65 @@ def convert_map(input_path, output_bin, output_ent=None):
                     f.write(f"        dta 0\n")
 
         print(f"ASM spawns: {asm_path}")
+
+    # Generate .lvl binary (for disk loading at runtime)
+    if output_ent:
+        lvl_path = output_bin.replace('.bin', '.lvl')
+        lvl = bytearray(map_data)                     # 1024 bytes: tiles
+
+        # Header (7 bytes)
+        spawn_px = player_spawn[0] * 16 if player_spawn else 32
+        spawn_py = player_spawn[1] * 16 if player_spawn else 32
+        enemies = [e for e in entities if e[2] in ('zombie', 'imp', 'pinky', 'caco', 'shotgun', 'baron')]
+        pickups_l = [e for e in entities if e[2] in pickup_types]
+        decors_l = [e for e in entities if e[2] in decor_types]
+        lvl.append(spawn_px & 0xFF)                    # spawn_x lo
+        lvl.append((spawn_px >> 8) & 0xFF)             # spawn_x hi
+        lvl.append(spawn_py & 0xFF)                    # spawn_y
+        lvl.append(len(enemies) & 0xFF)                # num_enemies
+        lvl.append(len(pickups_l) & 0xFF)              # num_pickups
+        lvl.append(len(decors_l) & 0xFF)               # num_decor
+        num_sw = min(len(switch_links), 4)
+        lvl.append(num_sw)                             # num_switches
+
+        # Enemies (5 bytes each: x_lo, x_hi, y, type, dir)
+        for col, row, etype, facing in enemies:
+            px = col * 16
+            lvl.append(px & 0xFF)
+            lvl.append((px >> 8) & 0xFF)
+            lvl.append(row * 16)
+            lvl.append(etype_map.get(etype, 0))
+            lvl.append(facing)
+
+        # Pickups (4 bytes each: x_lo, x_hi, y, type)
+        for col, row, ptype, _ in pickups_l:
+            px = col * 16
+            lvl.append(px & 0xFF)
+            lvl.append((px >> 8) & 0xFF)
+            lvl.append(row * 16)
+            lvl.append(ptype_map.get(ptype, 0))
+
+        # Decorations (4 bytes each: x_lo, x_hi, y, type)
+        for col, row, dtype, _ in decors_l:
+            px = col * 16
+            lvl.append(px & 0xFF)
+            lvl.append((px >> 8) & 0xFF)
+            lvl.append(row * 16)
+            lvl.append(dtype_map.get(dtype, 0))
+
+        # Switches (5 bytes each: col, row, tgt_col, tgt_row, action)
+        for i in range(num_sw):
+            s = switch_links[i]
+            act = act_map.get(s['action'], 0)
+            lvl.append(s['col'])
+            lvl.append(s['row'])
+            lvl.append(s['tgt_col'])
+            lvl.append(s['tgt_row'])
+            lvl.append(act)
+
+        with open(lvl_path, 'wb') as f:
+            f.write(lvl)
+        print(f"LVL binary: {lvl_path} ({len(lvl)} bytes)")
 
     # Stats
     tile_counts = {}

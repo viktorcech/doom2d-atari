@@ -53,6 +53,7 @@ TILES_DOORS = [
 
 TILES_SWITCHES = [
     ('$', 'switch',     '#40C040', 'tile_switch_off.png'),
+    ('E', 'exit switch','#FF4040', 'tile_exit_sw_off.png'),
 ]
 
 TILES = TILES_WALLS + TILES_FLOORS + TILES_BG + TILES_DOORS + TILES_SWITCHES

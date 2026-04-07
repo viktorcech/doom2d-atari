@@ -934,7 +934,7 @@ class MapEditor:
             self.status.config(text=f"Altirra path set: {path}")
 
     def test_in_altirra(self):
-        """Test: Validate, save map, build XEX, launch Altirra"""
+        """Test: Validate, save map, build ATR via build script, launch Altirra"""
         errors, warnings = self._validate_map()
         if errors:
             messagebox.showerror("Cannot test",
@@ -964,9 +964,6 @@ class MapEditor:
         import subprocess
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        tools_dir = os.path.join(base_dir, 'tools')
-        data_dir = os.path.join(base_dir, 'data')
-        source_dir = os.path.join(base_dir, 'source')
         bin_dir = os.path.join(base_dir, 'bin')
 
         # 1. Save map
@@ -974,68 +971,32 @@ class MapEditor:
         self.status.config(text="Test: saving map...")
         self.root.update()
 
-        # 2. Convert map
-        map2bin = os.path.join(tools_dir, 'map2bin.py')
-        bin_path = os.path.join(data_dir, 'test_map.bin')
-        ent_path = os.path.join(data_dir, 'test_map_ent.asm')
-        python_exe = self.config.get('python', sys.executable)
-        r = subprocess.run([python_exe, map2bin, self.filename, bin_path, ent_path],
-                           capture_output=True, text=True)
+        # 2. Run full build script (converts maps, builds XEX, creates ATR)
+        self.status.config(text="Test: building ATR...")
+        self.root.update()
+        build_script = os.path.join(base_dir, 'build_doom2d.sh')
+        # Find Git Bash (Windows: WSL bash != Git Bash)
+        git_bash = r'C:\Program Files\Git\usr\bin\bash.exe'
+        bash_cmd = git_bash if os.path.exists(git_bash) else 'bash'
+        r = subprocess.run([bash_cmd, build_script],
+                           capture_output=True, text=True, cwd=base_dir)
         if r.returncode != 0:
-            messagebox.showerror("Test", f"map2bin failed:\n{r.stderr}")
+            out = (r.stdout or '') + '\n' + (r.stderr or '')
+            if len(out) > 2000:
+                out = '...\n' + out[-2000:]
+            messagebox.showerror("Test",
+                f"Build failed (exit code {r.returncode}):\n\n{out}")
             return
 
-        # 2b. Convert sky background
-        self.status.config(text="Test: converting sky...")
-        self.root.update()
-        sky2bin = os.path.join(tools_dir, 'sky2bin.py')
-        sky_filename = None
-        for name, fn in SKY_LIST:
-            if name == self.sky_name:
-                sky_filename = fn
-                break
-        if sky_filename:
-            # Try multiple locations for sky images
-            sky_dirs = [
-                os.path.join(base_dir, 'editor', 'sky'),
-                os.path.join(base_dir, 'original-doom-2d',
-                             'D2DMP-Files-0.6', 'data', 'sky'),
-                os.path.join(base_dir, 'data', 'preview'),
-            ]
-            sky_src = None
-            for sd in sky_dirs:
-                candidate = os.path.join(sd, sky_filename)
-                if os.path.exists(candidate):
-                    sky_src = candidate
-                    break
-            palette = os.path.join(data_dir, 'palette.bin')
-            sky_prefix = os.path.join(data_dir, 'sky')
-            if sky_src:
-                r = subprocess.run([python_exe, sky2bin, sky_src, palette, sky_prefix],
-                                   capture_output=True, text=True)
-                if r.returncode != 0:
-                    messagebox.showerror("Test", f"sky2bin failed:\n{r.stderr}\n{r.stdout}")
-                    return
-            else:
-                messagebox.showwarning("Test", f"Sky image not found: {sky_filename}")
-
-        self.status.config(text="Test: building XEX...")
-        self.root.update()
-
-        # 3. Build XEX
-        mads = os.path.join(base_dir, 'mads.exe')
-        xex = os.path.join(bin_dir, 'doom2d.xex')
-        r = subprocess.run([mads, 'main.asm', f'-o:{xex}'],
-                           capture_output=True, text=True, cwd=source_dir)
-        if r.returncode != 0:
-            messagebox.showerror("Test", f"MADS build failed:\n{r.stdout}\n{r.stderr}")
+        # 3. Launch Altirra with ATR
+        atr = os.path.join(bin_dir, 'doom2d.atr')
+        if not os.path.exists(atr):
+            messagebox.showerror("Test", f"ATR not found: {atr}")
             return
         self.status.config(text="Test: launching Altirra...")
         self.root.update()
-
-        # 4. Launch Altirra
-        subprocess.Popen([altirra, xex])
-        self.status.config(text=f"Test: launched Altirra with {os.path.basename(xex)}")
+        subprocess.Popen([altirra, '/disk', atr])
+        self.status.config(text=f"Test: launched Altirra with {os.path.basename(atr)}")
 
     def toggle_grid(self):
         self.show_grid = not self.show_grid
