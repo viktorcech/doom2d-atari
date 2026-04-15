@@ -61,6 +61,9 @@ slot_mode   dta 0               ; 0=save, 1=load
         sta slot_sel
         sta slot_prev
         sta $02FC               ; clear keyboard
+        ; Play enter sound (after SIO in read_slot_headers)
+        ldx #SFX_PISTOL
+        jsr snd_play
         ; Draw on both buffers
         jsr slot_draw_both
 
@@ -518,8 +521,8 @@ rsh_idx dta 0
         sta sv_off+1
 
         ; --- Copy arrays via loop helper ---
-        ; Enemy arrays: 17 arrays × MAX_ENEMIES(6)
-        ldx #6
+        ; Enemy arrays: 17 arrays × MAX_ENEMIES
+        ldx #MAX_ENEMIES
         lda #<en_x
         ldy #>en_x
         jsr sv_copy_array
@@ -892,7 +895,7 @@ rsh_idx dta 0
         sta sv_off+1
 
         ; --- Restore arrays ---
-        ldx #6
+        ldx #MAX_ENEMIES
         lda #<en_x
         ldy #>en_x
         jsr ld_copy_array

@@ -466,3 +466,221 @@ hud_xpos dta 0
         sta MEMW+[VRAM_BCB&$FFF]+20
         rts
 .endp
+
+; ============================================
+; 2026-04-08: SHOW LEVEL STATS
+; Black screen with KILLS: X/Y and TIME: MM:SS
+; Waits for fire button, then returns.
+; ============================================
+
+; Char indices: 0-9 = digits, 10 = heart, 11 = bullet, 12+ = A(12)..Z(37)
+CH_A = 12
+CH_SLASH = 11                   ; reuse bullet char as separator
+
+.proc show_level_stats
+        ; Clear screen to black
+        jsr wait_blit
+        jsr clear_full_black
+
+        ; --- Draw "LEVEL X" centered at Y=48 ---
+        lda #48
+        sta zdy
+        lda #0
+        sta zdxh
+        ; L E V E L
+        lda #56
+        sta zdx
+        lda #CH_A+11            ; L
+        jsr blit_hud_char
+        lda #64
+        sta zdx
+        lda #CH_A+4             ; E
+        jsr blit_hud_char
+        lda #72
+        sta zdx
+        lda #CH_A+21            ; V
+        jsr blit_hud_char
+        lda #80
+        sta zdx
+        lda #CH_A+4             ; E
+        jsr blit_hud_char
+        lda #88
+        sta zdx
+        lda #CH_A+11            ; L
+        jsr blit_hud_char
+        ; Level number (current_level + 1, 1-based)
+        lda #104
+        sta zdx
+        lda current_level
+        clc
+        adc #1                  ; 0-based → 1-based
+        jsr num_to_digits
+        lda hd_d0
+        jsr blit_hud_char
+
+        ; --- Draw "KILLS" at Y=72 ---
+        lda #72
+        sta zdy
+        lda #0
+        sta zdxh
+
+        lda #56                 ; X = 56
+        sta zdx
+        lda #CH_A+10            ; K
+        jsr blit_hud_char
+        lda #64
+        sta zdx
+        lda #CH_A+8             ; I
+        jsr blit_hud_char
+        lda #72
+        sta zdx
+        lda #CH_A+11            ; L
+        jsr blit_hud_char
+        lda #80
+        sta zdx
+        lda #CH_A+11            ; L
+        jsr blit_hud_char
+        lda #88
+        sta zdx
+        lda #CH_A+18            ; S
+        jsr blit_hud_char
+
+        ; Draw kills count: stat_kills
+        lda #104
+        sta zdx
+        lda stat_kills
+        jsr num_to_digits
+        ; Skip leading zeros for tens
+        lda hd_d2
+        beq ?no_h
+        jsr blit_hud_char       ; hundreds
+        lda #112
+        sta zdx
+?no_h   lda hd_d1
+        ora hd_d2
+        beq ?no_t
+        lda #112
+        sta zdx
+        lda hd_d1
+        jsr blit_hud_char       ; tens
+?no_t   lda #120
+        sta zdx
+        lda hd_d0
+        jsr blit_hud_char       ; ones
+
+        ; Draw "/" separator
+        lda #128
+        sta zdx
+        lda #CH_SLASH
+        jsr blit_hud_char
+
+        ; Draw total: stat_total_en
+        lda stat_total_en
+        jsr num_to_digits
+        lda #136
+        sta zdx
+        lda hd_d1
+        ora hd_d2
+        beq ?no_tt
+        lda hd_d2
+        beq ?no_th
+        jsr blit_hud_char
+        lda #144
+        sta zdx
+?no_th  lda hd_d1
+        jsr blit_hud_char
+?no_tt  lda #144
+        sta zdx
+        lda hd_d0
+        jsr blit_hud_char
+
+        ; --- Draw "TIME" at row 8 ---
+        lda #96                 ; Y = 96
+        sta zdy
+
+        lda #56
+        sta zdx
+        lda #CH_A+19            ; T
+        jsr blit_hud_char
+        lda #64
+        sta zdx
+        lda #CH_A+8             ; I
+        jsr blit_hud_char
+        lda #72
+        sta zdx
+        lda #CH_A+12            ; M
+        jsr blit_hud_char
+        lda #80
+        sta zdx
+        lda #CH_A+4             ; E
+        jsr blit_hud_char
+
+        ; Calculate minutes and seconds from 16-bit time (stat_time_hi:stat_time_lo)
+        ; Repeated subtraction: divide by 60 to get minutes, remainder = seconds
+        lda stat_time_lo
+        sta sl_secs             ; sl_secs = working lo byte
+        lda stat_time_hi
+        sta sl_mins             ; sl_mins = working hi byte (reused as temp)
+        ldx #0                  ; X = minutes counter
+?div60  lda sl_mins             ; hi byte
+        bne ?sub60              ; if hi > 0, definitely >= 60
+        lda sl_secs             ; hi == 0, check lo
+        cmp #60
+        bcc ?got_min            ; < 60, done
+?sub60  lda sl_secs
+        sec
+        sbc #60
+        sta sl_secs
+        lda sl_mins
+        sbc #0
+        sta sl_mins
+        inx
+        cpx #100                ; cap at 99 minutes (safety)
+        bcc ?div60
+?got_min
+        lda sl_secs             ; remainder = seconds (0-59)
+        sta sl_secs
+        stx sl_mins             ; quotient = minutes
+
+        ; Draw MM:SS
+        lda #104
+        sta zdx
+        lda sl_mins
+        jsr num_to_digits
+        lda hd_d1
+        jsr blit_hud_char       ; minutes tens
+        lda #112
+        sta zdx
+        lda hd_d0
+        jsr blit_hud_char       ; minutes ones
+
+        ; Colon (:) — no colon char, skip 8px gap
+        lda #128
+        sta zdx
+        lda sl_secs
+        jsr num_to_digits
+        lda hd_d1
+        jsr blit_hud_char       ; seconds tens
+        lda #136
+        sta zdx
+        lda hd_d0
+        jsr blit_hud_char       ; seconds ones
+
+        ; Show on screen (swap to display this buffer)
+        jsr wait_blit
+        lda #BANK_EN+BANK_XDL
+        sta VBXE_BANK_SEL
+        lda zbuf_hi
+        sta MEMW+[VRAM_XDL&$FFF]+8
+
+        ; Wait for fire release (TRIG0: 0=pressed, 1=released)
+?rel    lda TRIG0
+        beq ?rel                ; wait while pressed
+        ; Wait for fire press
+?wait   lda TRIG0
+        bne ?wait               ; wait while released
+        rts
+
+sl_mins dta 0
+sl_secs dta 0
+.endp

@@ -8,6 +8,13 @@
 ; ============================================
 level_complete  dta 0           ; 1 = switch activated, level done
 
+; 2026-04-08: End-level statistics
+stat_kills      dta 0           ; enemies killed this level
+stat_total_en   dta 0           ; total enemies at level start
+stat_time_lo    dta 0           ; level time in seconds (lo byte)
+stat_time_hi    dta 0           ; level time in seconds (hi byte)
+stat_frames     dta 0           ; frame counter for second tracking
+
 SW_AUTO_OFF     = 150           ; auto-off timer (~2.5 sec at 60fps)
 
 ; Switch auto-off timers (per switch slot)
@@ -210,8 +217,10 @@ sw_sfx_tmp dta 0
         cmp scan_min_col_0
         bcs ?a0
         sta scan_min_col_0
-?a0     sta scan_min_col_1
-        lda gt_col
+?a0     cmp scan_min_col_1      ; fix: conditional update for buf1 (was unconditional)
+        bcs ?a1
+        sta scan_min_col_1
+?a1     lda gt_col
         cmp scan_max_col_0
         bcc ?b0
         sta scan_max_col_0
@@ -317,6 +326,8 @@ idsw_door dta 0
         beq ?act_door
         cmp #SW_ACT_WALL
         beq ?act_wall
+        cmp #SW_ACT_TRAP
+        beq ?act_trap
         cmp #SW_ACT_EXIT
         beq ?act_exit
         ; Default / SW_ACT_ELEV: future
@@ -345,8 +356,22 @@ idsw_door dta 0
         sta (ztptr),y
         ; Mark target dirty
         jsr mark_pos_dirty
-        ; Play switch sound
-        ldx #SFX_SWTCHX
+        ; Drop pickups standing on removed wall
+        jsr drop_pickups_on_tile
+        ; Play door open sound (wall revealing)
+        ldx #SFX_DOOROPN
+        jsr snd_play
+        rts
+?act_trap
+        ; Remove wall + wake sleeping enemies nearby
+        ldy #0
+        lda #0
+        sta (ztptr),y
+        jsr mark_pos_dirty
+        jsr wake_enemies_near
+        ; Drop pickups standing on removed wall
+        jsr drop_pickups_on_tile
+        ldx #SFX_DOOROPN
         jsr snd_play
         rts
 ?act_exit
@@ -515,4 +540,179 @@ ft_cur_row dta 0
         jmp ?lp
 ?done   rts
 us_idx  dta 0
+.endp
+
+; ============================================
+; DROP PICKUPS standing on removed tile (r_col, r_row)
+; If a pickup is on tile row (r_row - 1) at column r_col,
+; drop it 16px down (onto the now-empty tile).
+; ============================================
+.proc drop_pickups_on_tile
+        ; Compute expected pk_y: pickup on row above = r_row * 16
+        lda r_row
+        asl
+        asl
+        asl
+        asl
+        sta dp_exp_y
+        ; Compute expected pk_x tile col: r_col
+        ; pk tile col = (pk_xhi * 16) + (pk_x / 16)
+        ldx #0
+?lp     cpx #MAX_PICKUPS
+        bcs ?done
+        lda pk_act,x
+        beq ?nx
+        ; Check Y: pk_y must == dp_exp_y (standing on that row)
+        lda pk_y,x
+        cmp dp_exp_y
+        bne ?nx
+        ; Check X: tile col of pickup must match r_col
+        ; tile_col = pk_xhi * 16 + pk_x / 16
+        lda pk_xhi,x
+        asl
+        asl
+        asl
+        asl
+        sta dp_tmp
+        lda pk_x,x
+        lsr
+        lsr
+        lsr
+        lsr
+        ora dp_tmp
+        cmp r_col
+        bne ?nx
+        ; Match! Drop pickup 16px down
+        lda pk_y,x
+        clc
+        adc #16
+        sta pk_y,x
+?nx     inx
+        jmp ?lp
+?done   rts
+dp_exp_y dta 0
+dp_tmp   dta 0
+.endp
+
+; ============================================
+; WAKE SLEEPING ENEMIES near target tile (r_col, r_row)
+; Wakes all en_act=3 enemies within ±3 tiles of target
+; ============================================
+.proc wake_enemies_near
+        ; Convert target tile to pixel X (16-bit) and Y
+        ; target_px = r_col * 16
+        lda r_col
+        asl
+        asl
+        asl
+        asl
+        sta wk_tx
+        lda r_col
+        lsr
+        lsr
+        lsr
+        lsr
+        sta wk_txh
+        ; target_py = r_row * 16
+        lda r_row
+        asl
+        asl
+        asl
+        asl
+        sta wk_ty
+        ldx #0
+?lp     cpx num_en
+        bcc ?chk
+        jmp ?done
+?chk    lda en_act,x
+        cmp #3
+        beq ?sleep
+        jmp ?nx                 ; not sleeping, skip
+?sleep
+        ; Check Y distance: |en_y - target_py| < 48
+        lda en_y,x
+        sec
+        sbc wk_ty
+        bpl ?yp
+        eor #$FF
+        clc
+        adc #1
+?yp     cmp #24
+        bcs ?nx
+        ; Check X distance (16-bit): |enxhi:en_x - txh:tx| < 24
+        lda en_x,x
+        sec
+        sbc wk_tx
+        sta wk_tmp
+        lda enxhi,x
+        sbc wk_txh
+        bpl ?xp
+        ; Negate 16-bit
+        pha
+        lda #0
+        sec
+        sbc wk_tmp
+        sta wk_tmp
+        pla
+        eor #$FF
+        adc #0
+?xp     bne ?nx                 ; hi != 0 → too far
+        lda wk_tmp
+        cmp #24
+        bcs ?nx
+        ; Wake this enemy + clear wall at body position
+        lda #1
+        sta en_act,x
+        stx wk_eidx
+        ; tile_col = (enxhi:en_x + 8) / 16
+        lda en_x,x
+        clc
+        adc #8
+        pha
+        lda enxhi,x
+        adc #0
+        asl
+        asl
+        asl
+        asl
+        sta gt_col
+        pla
+        lsr
+        lsr
+        lsr
+        lsr
+        ora gt_col
+        sta gt_col
+        ; tile_row = (en_y - 16) / 16 = body row, not feet
+        lda en_y,x
+        sec
+        sbc #16
+        lsr
+        lsr
+        lsr
+        lsr
+        sta gt_row
+        ; Clear wall tile at body position
+        tay
+        lda map_row_lo,y
+        sta ztptr
+        lda map_row_hi,y
+        sta ztptr+1
+        lda #BANK_EN+BANK_MAP
+        sta VBXE_BANK_SEL
+        ldy gt_col
+        lda #0
+        sta (ztptr),y
+        lda #0
+        sta VBXE_BANK_SEL
+        jsr mark_pos_dirty
+        ldx wk_eidx
+?nx     inx
+        jmp ?lp
+?done   rts
+wk_tx   dta 0
+wk_txh  dta 0
+wk_ty   dta 0
+wk_tmp  dta 0
+wk_eidx dta 0
 .endp

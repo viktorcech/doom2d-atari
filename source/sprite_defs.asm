@@ -152,6 +152,50 @@ SPR_ZOMBIE_PAIN              equ 142  ; 16x32, VRAM $051400
 SPR_ZOMBIE_PAIN_L            equ 143  ; 16x32, VRAM $051600
 SPR_CACO_FIRE1               equ 144  ; 8x8,   VRAM $01E480
 SPR_CACO_FIRE2               equ 145  ; 8x8,   VRAM $01E4C0
+SPR_BARON_FIRE1              equ 146  ; 8x8,   VRAM $01E500
+SPR_BARON_FIRE2              equ 147  ; 8x8,   VRAM $01E540
+SPR_SHOTGUN_PAIN             equ 148  ; 16x32, VRAM $051800
+SPR_SHOTGUN_PAIN_L           equ 149  ; 16x32, VRAM $051A00
+SPR_IMP_PAIN                 equ 150  ; 16x32, VRAM $051C00
+SPR_IMP_PAIN_L               equ 151  ; 16x32, VRAM $051E00
+SPR_PINKY_PAIN               equ 152  ; 16x32, VRAM $052000
+SPR_PINKY_PAIN_L             equ 153  ; 16x32, VRAM $052200
+SPR_CACO_PAIN                equ 154  ; 16x32, VRAM $052400
+SPR_CACO_PAIN_L              equ 155  ; 16x32, VRAM $052600
+SPR_BARON_PAIN               equ 156  ; 16x32, VRAM $052800
+SPR_BARON_PAIN_L             equ 157  ; 16x32, VRAM $052A00
+; 2026-04-08: New decoration sprites (VRAM $053000+, chunk8)
+SPR_DECOR_EVILEYE            equ 158  ; 16x32, VRAM $053000
+SPR_DECOR_SKULPILLAR         equ 159  ; 16x32, VRAM $053200
+SPR_DECOR_ELECLAMP           equ 160  ; 16x32, VRAM $053400
+SPR_DECOR_DEADTREE           equ 161  ; 16x32, VRAM $053600
+SPR_DECOR_BROWNTREE          equ 162  ; 16x32, VRAM $053800
+SPR_DECOR_HANGBODY           equ 163  ; 16x32, VRAM $053A00
+SPR_DECOR_HANGLEG            equ 164  ; 16x16, VRAM $053C00
+SPR_DECOR_IMPALED            equ 165  ; 16x32, VRAM $053D00
+SPR_DECOR_SKULLPILE          equ 166  ; 16x16, VRAM $053F00
+SPR_DECOR_REDTORCH1          equ 167  ; 16x32, VRAM $054000
+SPR_DECOR_REDTORCH2          equ 168  ; 16x32, VRAM $054200
+SPR_DECOR_REDTORCH3          equ 169  ; 16x32, VRAM $054400
+SPR_DECOR_REDTORCH4          equ 170  ; 16x32, VRAM $054600
+; Lost Soul sprites (VRAM $055000+, chunk9)
+SPR_LOSTSOUL_IDLE            equ 171  ; 16x32, VRAM $055000
+SPR_LOSTSOUL_WALK1           equ 172  ; 16x32, VRAM $055200
+SPR_LOSTSOUL_WALK2           equ 173  ; 16x32, VRAM $055400
+SPR_LOSTSOUL_WALK3           equ 174  ; 16x32, VRAM $055600
+SPR_LOSTSOUL_SHOOT           equ 175  ; 16x32, VRAM $055800
+SPR_LOSTSOUL_DEATH1          equ 176  ; 16x32, VRAM $055A00
+SPR_LOSTSOUL_IDLE_L          equ 177  ; 16x32, VRAM $055C00
+SPR_LOSTSOUL_WALK1_L         equ 178  ; 16x32, VRAM $055E00
+SPR_LOSTSOUL_WALK2_L         equ 179  ; 16x32, VRAM $056000
+SPR_LOSTSOUL_WALK3_L         equ 180  ; 16x32, VRAM $056200
+SPR_LOSTSOUL_SHOOT_L         equ 181  ; 16x32, VRAM $056400
+SPR_LOSTSOUL_DEATH1_L        equ 182  ; 16x32, VRAM $056600
+SPR_LOSTSOUL_DEATH2          equ 183  ; 16x32, VRAM $056800
+SPR_LOSTSOUL_DEATH3          equ 184  ; 16x32, VRAM $056A00
+SPR_LOSTSOUL_PAIN            equ 185  ; 16x32, VRAM $056C00
+SPR_LOSTSOUL_PAIN_L          equ 186  ; 16x32, VRAM $056E00
+LOSTSOUL_MIRROR              equ 6    ; mirror offset for Lost Soul (177-171)
 SPRITESHEET_SIZE         equ $C000      ; chunks 1-4 (49152 bytes)
 
 ; Player sprite aliases
@@ -175,6 +219,7 @@ EN_PINKY                        equ 2
 EN_CACO                         equ 3
 EN_SHOTGUN                      equ 4
 EN_BARON                        equ 5
+EN_LOSTSOUL                     equ 6
 
 ; Sprite VRAM offset tables
 spr_off_lo
@@ -324,6 +369,49 @@ spr_off_lo
         dta <$0000  ; zombie_pain_L (VRAM $051600)
         dta <$0080  ; caco_fire1 (VRAM $01E480)
         dta <$00C0  ; caco_fire2 (VRAM $01E4C0)
+        dta <$0000  ; baron_fire1 (VRAM $01E500)
+        dta <$0040  ; baron_fire2 (VRAM $01E540)
+        dta <$0000  ; shotgun_pain (VRAM $051800)
+        dta <$0000  ; shotgun_pain_L (VRAM $051A00)
+        dta <$0000  ; imp_pain (VRAM $051C00)
+        dta <$0000  ; imp_pain_L (VRAM $051E00)
+        dta <$0000  ; pinky_pain (VRAM $052000)
+        dta <$0000  ; pinky_pain_L (VRAM $052200)
+        dta <$0000  ; caco_pain (VRAM $052400)
+        dta <$0000  ; caco_pain_L (VRAM $052600)
+        dta <$0000  ; baron_pain (VRAM $052800)
+        dta <$0000  ; baron_pain_L (VRAM $052A00)
+        ; 2026-04-08: new decorations (VRAM $053000+)
+        dta <$0000  ; decor_evileye ($053000)
+        dta <$0000  ; decor_skulpillar ($053200)
+        dta <$0000  ; decor_eleclamp ($053400)
+        dta <$0000  ; decor_deadtree ($053600)
+        dta <$0000  ; decor_browntree ($053800)
+        dta <$0000  ; decor_hangbody ($053A00)
+        dta <$0000  ; decor_hangleg ($053C00)
+        dta <$0000  ; decor_impaled ($053D00)
+        dta <$0000  ; decor_skullpile ($053F00)
+        dta <$0000  ; decor_redtorch1 ($054000)
+        dta <$0000  ; decor_redtorch2 ($054200)
+        dta <$0000  ; decor_redtorch3 ($054400)
+        dta <$0000  ; decor_redtorch4 ($054600)
+        ; Lost Soul sprites (VRAM $055000+)
+        dta <$0000  ; lostsoul_idle ($055000)
+        dta <$0000  ; lostsoul_walk1 ($055200)
+        dta <$0000  ; lostsoul_walk2 ($055400)
+        dta <$0000  ; lostsoul_walk3 ($055600)
+        dta <$0000  ; lostsoul_shoot ($055800)
+        dta <$0000  ; lostsoul_death1 ($055A00)
+        dta <$0000  ; lostsoul_idle_L ($055C00)
+        dta <$0000  ; lostsoul_walk1_L ($055E00)
+        dta <$0000  ; lostsoul_walk2_L ($056000)
+        dta <$0000  ; lostsoul_walk3_L ($056200)
+        dta <$0000  ; lostsoul_shoot_L ($056400)
+        dta <$0000  ; lostsoul_death1_L ($056600)
+        dta <$0000  ; lostsoul_death2 ($056800)
+        dta <$0000  ; lostsoul_death3 ($056A00)
+        dta <$0000  ; lostsoul_pain ($056C00)
+        dta <$0000  ; lostsoul_pain_L ($056E00)
 
 spr_off_hi
         dta >$0000  ; player_idle
@@ -466,12 +554,55 @@ spr_off_hi
         dta >$E900  ; pl_death3 ($01F980)
         dta >$D400  ; imp_fire1 ($01E400, +$10=$E4)
         dta >$D440  ; imp_fire2 ($01E440, +$10=$E4)
-        dta >$0000  ; pl_pain ($051000, +$10=$10)
-        dta >$0200  ; pl_pain_L ($051200, +$10=$12)
-        dta >$0400  ; zombie_pain ($051400, +$10=$14)
-        dta >$0600  ; zombie_pain_L ($051600, +$10=$16)
+        dta >$7000  ; pl_pain ($058000, +$10=$80)
+        dta >$7200  ; pl_pain_L ($058200, +$10=$82)
+        dta >$7400  ; zombie_pain ($058400, +$10=$84)
+        dta >$7600  ; zombie_pain_L ($058600, +$10=$86)
         dta >$D480  ; caco_fire1 ($01E480, +$10=$E4)
         dta >$D4C0  ; caco_fire2 ($01E4C0, +$10=$E4)
+        dta >$D500  ; baron_fire1 ($01E500, +$10=$E5)
+        dta >$D540  ; baron_fire2 ($01E540, +$10=$E5)
+        dta >$7800  ; shotgun_pain ($058800, +$10=$88)
+        dta >$7A00  ; shotgun_pain_L ($058A00, +$10=$8A)
+        dta >$7C00  ; imp_pain ($058C00, +$10=$8C)
+        dta >$7E00  ; imp_pain_L ($058E00, +$10=$8E)
+        dta >$8000  ; pinky_pain ($059000, +$10=$90)
+        dta >$8200  ; pinky_pain_L ($059200, +$10=$92)
+        dta >$8400  ; caco_pain ($059400, +$10=$94)
+        dta >$8600  ; caco_pain_L ($059600, +$10=$96)
+        dta >$8800  ; baron_pain ($059800, +$10=$98)
+        dta >$8A00  ; baron_pain_L ($059A00, +$10=$9A)
+        ; new decorations (VRAM $054000+)
+        dta >$3000  ; decor_evileye ($054000, +$10=$40)
+        dta >$3200  ; decor_skulpillar ($054200, +$10=$42)
+        dta >$3400  ; decor_eleclamp ($054400, +$10=$44)
+        dta >$3600  ; decor_deadtree ($054600, +$10=$46)
+        dta >$3800  ; decor_browntree ($054800, +$10=$48)
+        dta >$3A00  ; decor_hangbody ($054A00, +$10=$4A)
+        dta >$3C00  ; decor_hangleg ($054C00, +$10=$4C)
+        dta >$3D00  ; decor_impaled ($054D00, +$10=$4D)
+        dta >$3F00  ; decor_skullpile ($054F00, +$10=$4F)
+        dta >$4000  ; decor_redtorch1 ($055000, +$10=$50)
+        dta >$4200  ; decor_redtorch2 ($055200, +$10=$52)
+        dta >$4400  ; decor_redtorch3 ($055400, +$10=$54)
+        dta >$4600  ; decor_redtorch4 ($055600, +$10=$56)
+        ; Lost Soul (VRAM $056000+, +$10 offset applied by renderer)
+        dta >$5000  ; lostsoul_idle ($056000, +$10=$60)
+        dta >$5200  ; lostsoul_walk1 ($056200, +$10=$62)
+        dta >$5400  ; lostsoul_walk2 ($056400, +$10=$64)
+        dta >$5600  ; lostsoul_walk3 ($056600, +$10=$66)
+        dta >$5800  ; lostsoul_shoot ($056800, +$10=$68)
+        dta >$5A00  ; lostsoul_death1 ($056A00, +$10=$6A)
+        dta >$5C00  ; lostsoul_idle_L ($056C00, +$10=$6C)
+        dta >$5E00  ; lostsoul_walk1_L ($056E00, +$10=$6E)
+        dta >$6000  ; lostsoul_walk2_L ($057000, +$10=$70)
+        dta >$6200  ; lostsoul_walk3_L ($057200, +$10=$72)
+        dta >$6400  ; lostsoul_shoot_L ($057400, +$10=$74)
+        dta >$6600  ; lostsoul_death1_L ($057600, +$10=$76)
+        dta >$6800  ; lostsoul_death2 ($057800, +$10=$78)
+        dta >$6A00  ; lostsoul_death3 ($057A00, +$10=$7A)
+        dta >$6C00  ; lostsoul_pain ($057C00, +$10=$7C)
+        dta >$6E00  ; lostsoul_pain_L ($057E00, +$10=$7E)
 
 ; Sprite VRAM bank table (high byte of 24-bit VRAM address)
 ; $01 = banks $10-$1F (VRAM $01xxxx), $03 = banks $30+ (VRAM $03xxxx)
@@ -622,6 +753,49 @@ spr_off_bank
         dta $05  ; zombie_pain_L
         dta $01  ; caco_fire1 (VRAM $01xxxx)
         dta $01  ; caco_fire2 (VRAM $01xxxx)
+        dta $01  ; baron_fire1 (VRAM $01xxxx)
+        dta $01  ; baron_fire2 (VRAM $01xxxx)
+        dta $05  ; shotgun_pain (VRAM $05xxxx)
+        dta $05  ; shotgun_pain_L
+        dta $05  ; imp_pain
+        dta $05  ; imp_pain_L
+        dta $05  ; pinky_pain
+        dta $05  ; pinky_pain_L
+        dta $05  ; caco_pain
+        dta $05  ; caco_pain_L
+        dta $05  ; baron_pain
+        dta $05  ; baron_pain_L
+        ; new decorations
+        dta $05  ; decor_evileye
+        dta $05  ; decor_skulpillar
+        dta $05  ; decor_eleclamp
+        dta $05  ; decor_deadtree
+        dta $05  ; decor_browntree
+        dta $05  ; decor_hangbody
+        dta $05  ; decor_hangleg
+        dta $05  ; decor_impaled
+        dta $05  ; decor_skullpile
+        dta $05  ; decor_redtorch1
+        dta $05  ; decor_redtorch2
+        dta $05  ; decor_redtorch3
+        dta $05  ; decor_redtorch4
+        ; Lost Soul
+        dta $05  ; lostsoul_idle
+        dta $05  ; lostsoul_walk1
+        dta $05  ; lostsoul_walk2
+        dta $05  ; lostsoul_walk3
+        dta $05  ; lostsoul_shoot
+        dta $05  ; lostsoul_death1
+        dta $05  ; lostsoul_idle_L
+        dta $05  ; lostsoul_walk1_L
+        dta $05  ; lostsoul_walk2_L
+        dta $05  ; lostsoul_walk3_L
+        dta $05  ; lostsoul_shoot_L
+        dta $05  ; lostsoul_death1_L
+        dta $05  ; lostsoul_death2
+        dta $05  ; lostsoul_death3
+        dta $05  ; lostsoul_pain
+        dta $05  ; lostsoul_pain_L
 
 ; Sprite width/height tables
 spr_w
@@ -771,6 +945,34 @@ spr_w
         dta 16  ; zombie_pain_L
         dta 8   ; caco_fire1
         dta 8   ; caco_fire2
+        dta 8   ; baron_fire1
+        dta 8   ; baron_fire2
+        dta 16  ; shotgun_pain
+        dta 16  ; shotgun_pain_L
+        dta 16  ; imp_pain
+        dta 16  ; imp_pain_L
+        dta 16  ; pinky_pain
+        dta 16  ; pinky_pain_L
+        dta 16  ; caco_pain
+        dta 16  ; caco_pain_L
+        dta 16  ; baron_pain
+        dta 16  ; baron_pain_L
+        ; new decorations
+        dta 16  ; decor_evileye
+        dta 16  ; decor_skulpillar
+        dta 16  ; decor_eleclamp
+        dta 16  ; decor_deadtree
+        dta 16  ; decor_browntree
+        dta 16  ; decor_hangbody
+        dta 16  ; decor_hangleg
+        dta 16  ; decor_impaled
+        dta 16  ; decor_skullpile
+        dta 16  ; decor_redtorch1
+        dta 16  ; decor_redtorch2
+        dta 16  ; decor_redtorch3
+        dta 16  ; decor_redtorch4
+        ; Lost Soul (all 16x32)
+        :16 dta 16  ; lostsoul sprites (16 entries)
 
 spr_h
         dta 32  ; player_idle
@@ -919,6 +1121,34 @@ spr_h
         dta 32  ; zombie_pain_L
         dta 8   ; caco_fire1
         dta 8   ; caco_fire2
+        dta 8   ; baron_fire1
+        dta 8   ; baron_fire2
+        dta 32  ; shotgun_pain
+        dta 32  ; shotgun_pain_L
+        dta 32  ; imp_pain
+        dta 32  ; imp_pain_L
+        dta 32  ; pinky_pain
+        dta 32  ; pinky_pain_L
+        dta 32  ; caco_pain
+        dta 32  ; caco_pain_L
+        dta 32  ; baron_pain
+        dta 32  ; baron_pain_L
+        ; new decorations
+        dta 32  ; decor_evileye
+        dta 32  ; decor_skulpillar
+        dta 32  ; decor_eleclamp
+        dta 32  ; decor_deadtree
+        dta 32  ; decor_browntree
+        dta 32  ; decor_hangbody
+        dta 16  ; decor_hangleg
+        dta 32  ; decor_impaled
+        dta 16  ; decor_skullpile
+        dta 32  ; decor_redtorch1
+        dta 32  ; decor_redtorch2
+        dta 32  ; decor_redtorch3
+        dta 32  ; decor_redtorch4
+        ; Lost Soul (all 16x32)
+        :16 dta 32  ; lostsoul sprites (16 entries)
 
 ; Enemy base sprite + HP tables
 en_base_spr
@@ -928,6 +1158,7 @@ en_base_spr
         dta 24  ; caco
         dta 30  ; shotgun
         dta 36  ; baron
+        dta SPR_LOSTSOUL_IDLE  ; lostsoul
 
 en_hp_tab
         dta 3  ; zombie
@@ -935,15 +1166,17 @@ en_hp_tab
         dta 8  ; pinky
         dta 12  ; caco
         dta 6  ; shotgun
-        dta 20  ; baron
+        dta 30  ; baron
+        dta 4  ; lostsoul
 
 en_speed_tab
-        dta 2  ; zombie
-        dta 2  ; imp
-        dta 3  ; pinky (melee - must catch player)
-        dta 2  ; caco
-        dta 2  ; shotgun
-        dta 2  ; baron
+        dta 1  ; zombie (1px base)
+        dta 1  ; imp (1px base)
+        dta 2  ; pinky (1px base + 1px bonus = 2px)
+        dta 1  ; caco (1px base)
+        dta 1  ; shotgun (1px base)
+        dta 1  ; baron (1px base)
+        dta 2  ; lostsoul (1px base + 1px bonus = 2px)
 
 ; Gib sprite lookup (indexed by enemy type, 2 frames per type)
 ; Death frame 2 lookup (indexed by enemy type, 0=use death1)
@@ -954,6 +1187,7 @@ en_death2_spr
         dta SPR_CACO_DEATH2    ; caco
         dta SPR_SHOTGUN_DEATH2 ; shotgun
         dta SPR_BARON_DEATH2   ; baron
+        dta SPR_LOSTSOUL_DEATH2 ; lostsoul
 
 ; Death frame 3 lookup (indexed by enemy type, 0=use death1)
 en_death3_spr
@@ -963,6 +1197,7 @@ en_death3_spr
         dta SPR_CACO_DEATH3    ; caco
         dta SPR_SHOTGUN_DEATH3 ; shotgun
         dta SPR_BARON_DEATH3   ; baron
+        dta SPR_LOSTSOUL_DEATH3 ; lostsoul
 
 ; Gib sprite lookup (indexed by enemy type)
 en_gib1_spr
@@ -972,6 +1207,7 @@ en_gib1_spr
         dta SPR_ZOMBIE_GIB1    ; caco (reuse zombie)
         dta SPR_SHOTGUN_GIB1   ; shotgun
         dta SPR_ZOMBIE_GIB1    ; baron (reuse zombie)
+        dta SPR_ZOMBIE_GIB1    ; lostsoul (reuse zombie)
 
 en_gib2_spr
         dta SPR_ZOMBIE_GIB2    ; zombie
@@ -980,6 +1216,7 @@ en_gib2_spr
         dta SPR_ZOMBIE_GIB2    ; caco (reuse zombie)
         dta SPR_SHOTGUN_GIB2   ; shotgun
         dta SPR_ZOMBIE_GIB2    ; baron (reuse zombie)
+        dta SPR_ZOMBIE_GIB2    ; lostsoul (reuse zombie)
 
 ; Enemy sound lookup tables (indexed by type, $FF = no sound)
 en_death_sfx
@@ -989,15 +1226,37 @@ en_death_sfx
         dta SFX_CACDTH     ; caco
         dta SFX_PODEATH    ; shotgun (same as zombie)
         dta SFX_BRSDTH     ; baron
+        dta SFX_FIRXPL     ; lostsoul (fireball explosion)
 
 ; Pain sprite lookup (indexed by enemy type, R variant, add 1 for L)
 en_pain_spr
         dta SPR_ZOMBIE_PAIN    ; zombie
-        dta 0                  ; imp (TODO)
-        dta 0                  ; pinky (TODO)
-        dta 0                  ; caco (TODO)
-        dta 0                  ; shotgun (TODO - same as zombie)
-        dta 0                  ; baron (TODO)
+        dta SPR_IMP_PAIN       ; imp
+        dta 0                  ; pinky
+        dta 0                  ; caco
+        dta SPR_SHOTGUN_PAIN   ; shotgun
+        dta 0                  ; baron
+        dta SPR_LOSTSOUL_PAIN  ; lostsoul
+
+; Pain SFX lookup (indexed by enemy type)
+en_pain_sfx
+        dta SFX_OOF            ; zombie
+        dta SFX_OOF            ; imp
+        dta SFX_DMPAIN         ; pinky
+        dta SFX_DMPAIN         ; caco
+        dta SFX_OOF            ; shotgun
+        dta SFX_OOF            ; baron
+        dta SFX_OOF            ; lostsoul
+
+; Mirror offset per enemy type (for render flip)
+en_mirror_off
+        dta MIRROR_OFFSET      ; zombie
+        dta MIRROR_OFFSET      ; imp
+        dta MIRROR_OFFSET      ; pinky
+        dta MIRROR_OFFSET      ; caco
+        dta MIRROR_OFFSET      ; shotgun
+        dta MIRROR_OFFSET      ; baron
+        dta LOSTSOUL_MIRROR    ; lostsoul
 
 en_sight_sfx
         dta SFX_POSIGHT    ; zombie
@@ -1006,6 +1265,7 @@ en_sight_sfx
         dta SFX_CACSIT     ; caco
         dta SFX_POSIGHT    ; shotgun (same as zombie)
         dta SFX_BRSSIT     ; baron
+        dta SFX_SKLATK     ; lostsoul (sight = attack sound, same as DOOM)
 
 ; Pickup type -> sprite index
 pk_spr_tab

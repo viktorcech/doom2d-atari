@@ -15,7 +15,7 @@ pk_type .ds MAX_PICKUPS         ; type (PK_xxx constants)
 ; HP/ammo amounts per pickup type
 pk_amount
         dta 10                  ; PK_HEALTH:     +10 HP
-        dta 1                   ; PK_AMMO:       +1 ammo
+        dta 5                   ; PK_AMMO:       +5 ammo (zombie drop)
         dta 25                  ; PK_MEDIKIT:     +25 HP
         dta 100                 ; PK_GREENARMOR:  100 armor (DOOM: green=100)
         dta 200                 ; PK_BLUEARMOR:   200 armor (DOOM: blue=200)
@@ -239,10 +239,9 @@ pk_class
         bcc ?wsok
         lda #50
 ?wsok   sta zpshells
-        lda wp_had
-        bne ?jsfx_ammo2
-        jmp ?sfx_wpn
-?jsfx_ammo2 jmp ?sfx_ammo
+        ldx #SFX_SGCOCK
+        jsr snd_play
+        jmp ?collect
 ?wchain cmp #PK_CHAINGUN
         bne ?wrocket
         lda wp_had

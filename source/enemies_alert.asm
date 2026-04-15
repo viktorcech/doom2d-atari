@@ -31,8 +31,15 @@
         bne ?sd
 ?fr     lda #0              ; player is right
 ?sd     sta en_dir,x
+        lda en_cooldown,x
+        bne ?already         ; already alerted → no sound
         lda #1
         sta en_cooldown,x   ; mark as alerted
+        stx aes_idx
+        jsr play_enemy_sight
+        ldx aes_idx
+        jmp ?nx
+?already
 ?nx     inx
         cpx #MAX_ENEMIES
         bcc ?lp
@@ -105,9 +112,11 @@ aes_idx dta 0
         bcs ?hr_ok
         tay
         lda (ztptr),y
+        bmi ?hr_pass        ; bit 7 = BG, passable
         tay
         lda tile_solid,y
         bne ?hr_blk
+?hr_pass
         inc ch_cur
         jmp ?hr_lp
 ?hr_ok  lda #0              ; Z=1 → clear

@@ -372,8 +372,10 @@ cpid_hrow dta 0
         cmp scan_min_col_0
         bcs ?a
         sta scan_min_col_0
-?a      sta scan_min_col_1
-        lda door_col,x
+?a      cmp scan_min_col_1      ; fix: conditional update for buf1 (was unconditional)
+        bcs ?a2
+        sta scan_min_col_1
+?a2     lda door_col,x
         cmp scan_max_col_0
         bcc ?b
         sta scan_max_col_0

@@ -1,6 +1,6 @@
 ; Auto-generated sound VRAM address tables
-; 32 sounds, 50318 bytes total
-; VRAM $044000-$05048D
+; 40 sounds, 64616 bytes total
+; VRAM $044000-$053C67
 
 ; Start bank (with BANK_EN)
 sfx_vbank
@@ -36,6 +36,14 @@ sfx_vbank
         dta $D3  ; SFX_SWTCHX (swtchx)
         dta $D3  ; SFX_CLAW (claw)
         dta $D3  ; SFX_SGTATK (sgtatk)
+        dta $D4  ; SFX_SKLATK (sklatk)
+        dta $D4  ; SFX_FIRXPL (firxpl)
+        dta $D4  ; SFX_DMPAIN (dmpain)
+        dta $D4  ; SFX_SGCOCK (sgcock)
+        dta $D4  ; SFX_IMPSIT2 (impsit2)
+        dta $D4  ; SFX_PODEATH2 (podth2)
+        dta $D4  ; SFX_PODEATH3 (podth3)
+        dta $D4  ; SFX_PSTOP (pstop)
 
 ; Start pointer lo (within MEMAC $9000 window)
 sfx_vptr_lo
@@ -71,6 +79,14 @@ sfx_vptr_lo
         dta $95  ; SFX_SWTCHX
         dta $68  ; SFX_CLAW
         dta $F0  ; SFX_SGTATK
+        dta $8E  ; SFX_SKLATK
+        dta $C9  ; SFX_FIRXPL
+        dta $10  ; SFX_DMPAIN
+        dta $CB  ; SFX_SGCOCK
+        dta $F8  ; SFX_IMPSIT2
+        dta $58  ; SFX_PODEATH2
+        dta $F3  ; SFX_PODEATH3
+        dta $B2  ; SFX_PSTOP
 
 ; Start pointer hi
 sfx_vptr_hi
@@ -106,6 +122,14 @@ sfx_vptr_hi
         dta $75  ; SFX_SWTCHX
         dta $79  ; SFX_CLAW
         dta $7D  ; SFX_SGTATK
+        dta $44  ; SFX_SKLATK
+        dta $4A  ; SFX_FIRXPL
+        dta $53  ; SFX_DMPAIN
+        dta $59  ; SFX_SGCOCK
+        dta $5D  ; SFX_IMPSIT2
+        dta $69  ; SFX_PODEATH2
+        dta $6F  ; SFX_PODEATH3
+        dta $77  ; SFX_PSTOP
 
 ; End bank (with BANK_EN)
 sfx_vbank_end
@@ -141,6 +165,14 @@ sfx_vbank_end
         dta $D3  ; SFX_SWTCHX
         dta $D3  ; SFX_CLAW
         dta $D4  ; SFX_SGTATK
+        dta $D4  ; SFX_SKLATK
+        dta $D4  ; SFX_FIRXPL
+        dta $D4  ; SFX_DMPAIN
+        dta $D4  ; SFX_SGCOCK
+        dta $D4  ; SFX_IMPSIT2
+        dta $D4  ; SFX_PODEATH2
+        dta $D4  ; SFX_PODEATH3
+        dta $D4  ; SFX_PSTOP
 
 ; End pointer lo
 sfx_vend_lo
@@ -176,6 +208,14 @@ sfx_vend_lo
         dta $68  ; SFX_SWTCHX
         dta $F0  ; SFX_CLAW
         dta $8E  ; SFX_SGTATK
+        dta $C9  ; SFX_SKLATK
+        dta $10  ; SFX_FIRXPL
+        dta $CB  ; SFX_DMPAIN
+        dta $F8  ; SFX_SGCOCK
+        dta $58  ; SFX_IMPSIT2
+        dta $F3  ; SFX_PODEATH2
+        dta $B2  ; SFX_PODEATH3
+        dta $68  ; SFX_PSTOP
 
 ; End pointer hi
 sfx_vend_hi
@@ -211,6 +251,14 @@ sfx_vend_hi
         dta $79  ; SFX_SWTCHX
         dta $7D  ; SFX_CLAW
         dta $44  ; SFX_SGTATK
+        dta $4A  ; SFX_SKLATK
+        dta $53  ; SFX_FIRXPL
+        dta $59  ; SFX_DMPAIN
+        dta $5D  ; SFX_SGCOCK
+        dta $69  ; SFX_IMPSIT2
+        dta $6F  ; SFX_PODEATH2
+        dta $77  ; SFX_PODEATH3
+        dta $7C  ; SFX_PSTOP
 
-SND_NUM_CHUNKS = 5
+SND_NUM_CHUNKS = 6
 SND_VRAM_BASE_BANK = $C4

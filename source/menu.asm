@@ -19,6 +19,7 @@ MENU_ITEMS  = 5
 
 menu_sel    dta 0
 menu_prev   dta 0
+menu_vc_tmp dta 0               ; 2026-04-08: RTCLOK3 snapshot for vsync wait (snd_poll clobbers A)
 draw_mode   dta 0           ; 0=draw_menu, 1=draw_settings
 menu_result dta 0           ; 0=new game, 2=load game, $FF=ESC
 menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
@@ -75,8 +76,12 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         lda #$FF
         sta $02FC
 ?wait_key
+        ; 2026-04-08: VBLANK wait + deferred VRAM reads
         lda RTCLOK3
-?wk_vs  cmp RTCLOK3
+        sta menu_vc_tmp
+?wk_vs  jsr snd_poll
+        lda RTCLOK3
+        cmp menu_vc_tmp
         beq ?wk_vs
         lda $02FC
         cmp #$FF
@@ -104,8 +109,6 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         cmp #$FF
         bne ?done
         ; ESC on title: close menu, go back to wait
-        ldx #SFX_SWTCHX
-        jsr snd_play
         jsr menu_close
         jmp ?wait_release
 ?done   rts
@@ -137,8 +140,6 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         lda #1
         rts
 ?resume
-        ldx #SFX_SWTCHX
-        jsr snd_play
         jsr menu_close
         lda #0
         rts
@@ -149,18 +150,26 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
 ; Sets menu_result: 0=new game, 2=load, $FF=ESC
 ; ============================================
 .proc menu_common_loop
+        ; Debounce: wait for fire button release before accepting input
+?debounce
+        lda TRIG0
+        beq ?debounce
 ?loop   jsr update_menu
         lda menu_sel
         cmp menu_prev
         beq ?no_redraw
-        ldx #SFX_PISTOL
+        ldx #SFX_PSTOP
         jsr snd_play
         jsr redraw_both
         lda menu_sel
         sta menu_prev
 ?no_redraw
+        ; 2026-04-08: VBLANK wait + deferred VRAM reads
         lda RTCLOK3
-?vs     cmp RTCLOK3
+        sta menu_vc_tmp
+?vs     jsr snd_poll
+        lda RTCLOK3
+        cmp menu_vc_tmp
         beq ?vs
 
         ; ESC
@@ -169,6 +178,9 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         bne ?no_esc
         lda #$FF
         sta $02FC
+        ldx #SFX_SWTCHX
+        jsr snd_play
+        lda #$FF
         sta menu_result
         rts
 ?no_esc
@@ -180,9 +192,13 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         jmp ?handle_sel
 ?chk_fire
         lda TRIG0
-        bne ?loop
+        bne ?no_fire            ; fire not pressed, loop
+        ; Fire pressed — wait for release first (debounce)
 ?fr_rel lda TRIG0
         beq ?fr_rel
+        jmp ?handle_sel
+?no_fire
+        jmp ?loop
 
 ?handle_sel
         lda #$FF
@@ -238,10 +254,40 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
 ?pl_fail jsr redraw_both
         jmp ?loop
 ?title_credits
-        jmp ?loop               ; credits (TODO)
+        jsr show_credits
+        jsr redraw_both
+        jmp ?loop
 ?not_3
         ; 4 = CREDITS (pause only)
+        jsr show_credits
+        jsr redraw_both
         jmp ?loop
+.endp
+
+; ============================================
+; SHOW CREDITS (wait for ESC or fire)
+; ============================================
+.proc show_credits
+        lda #2
+        sta draw_mode
+        jsr redraw_both
+        ; Wait for fire/key release first
+?rel    lda TRIG0
+        beq ?rel
+?loop   lda RTCLOK3
+?vs     cmp RTCLOK3
+        beq ?vs
+        ; ESC only
+        lda $02FC
+        cmp #$1C
+        bne ?loop
+        lda #$FF
+        sta $02FC
+        ldx #SFX_SWTCHX
+        jsr snd_play
+        lda #0
+        sta draw_mode
+        rts
 .endp
 
 ; ============================================

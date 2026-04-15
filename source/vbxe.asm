@@ -241,11 +241,16 @@ ic_bank dta 0
         rts
 .endp
 
-; WAIT_BLIT - Spin until blitter is idle (status register = 0)
+; WAIT_BLIT - Wait for blitter + do deferred sound VRAM reads
+; 2026-04-08: Calls snd_poll while waiting — does pending VRAM reads
+; during blitter dead time instead of wasting cycles in tight loop.
 .proc wait_blit
-?w      lda VBXE_BLITTER
+        lda VBXE_BLITTER
+        beq ?done
+?w      jsr snd_poll
+        lda VBXE_BLITTER
         bne ?w
-        rts
+?done   rts
 .endp
 
 ; ============================================
@@ -279,10 +284,22 @@ is_pal  dta 0
 ; src = $01:(r_tile):$00
 ; ============================================
 .proc blit_tile
-        ; Check if one-way tile or switch (needs bg + transparent blit)
+        ; Check bit 7 = BG variant (same texture, non-solid, draw with sky bg)
+        lda #0
+        sta bt_is_bg
         lda r_tile
+        bpl ?no_bg_flag
+        and #$7F            ; strip bit 7
+        sta r_tile
+        lda #1
+        sta bt_is_bg
+        jmp ?draw_bg
+?no_bg_flag
+        ; Check if one-way tile, half-height or switch (needs bg + transparent blit)
         tax
         lda tile_oneway,x
+        bne ?draw_bg
+        lda tile_halfh,x
         bne ?draw_bg
         lda r_tile
         cmp #TILE_SWITCH_OFF
@@ -293,22 +310,53 @@ is_pal  dta 0
         beq ?draw_bg
         cmp #TILE_EXIT_SW_ON
         beq ?draw_bg
-        jmp ?normal
+        cmp #15             ; barrel solid tile — draw with BG
+        beq ?draw_bg
+        jmp ?normal_sub
 ?draw_bg
-        ; First: draw sky background section at this tile position
+        ; First: draw background at this tile position
+        ; Check bg override table (for switches/platforms on wall BG)
         lda r_tile
         pha                 ; save original tile index
-        jsr blit_bg         ; copies sky from VRAM $034000+ at r_col,r_row
+        ldx #0
+?ov_lp  cpx tile_bg_cnt
+        bcs ?ov_sky         ; no override, draw sky
+        lda tile_bg_col,x
+        cmp r_col
+        bne ?ov_nx
+        lda tile_bg_row,x
+        cmp r_row
+        bne ?ov_nx
+        ; Found override — draw BG tile opaque, then switch transparent on top
+        lda tile_bg_tid,x
+        sta r_tile
+        lda #0
+        sta bt_is_bg        ; draw BG tile as normal opaque
+        jsr ?normal_sub     ; draw the BG tile (opaque)
+        jmp ?ov_done
+?ov_nx  inx
+        jmp ?ov_lp
+?ov_sky jsr blit_bg         ; copies sky from VRAM $034000+ at r_col,r_row
+?ov_done
         pla
         sta r_tile          ; restore original tile
-        ; Then: draw platform with BLT_TRANS (below, mode set at end)
-?normal
+        lda #1
+        sta bt_is_bg        ; force transparent for the overlay tile
+        ; Then: draw overlay tile with BLT_TRANS
+        jsr ?normal_sub
+?skip   rts
+
+?normal_sub
         jsr wait_blit
         lda #BANK_EN+BANK_BCB
         sta VBXE_BANK_SEL
         lda #0
         sta MEMW+[VRAM_BCB&$FFF]+0
         lda r_tile
+        cmp #TILE_SOLIDFLR
+        bne ?not_sflr
+        lda #12             ; solid floor uses metalflr texture
+?not_sflr
         cmp #16
         bcs ?newtile
         ; Old tiles 0-15: VRAM $01:tile:$00
@@ -368,10 +416,14 @@ is_pal  dta 0
         sta MEMW+[VRAM_BCB&$FFF]+13
         lda #TH-1
         sta MEMW+[VRAM_BCB&$FFF]+14
-        ; Blitter mode: transparent for one-way/switch tiles, opaque for rest
+        ; Blitter mode: transparent for BG/one-way/switch tiles, opaque for rest
+        lda bt_is_bg
+        bne ?trans
         lda r_tile
         tax
         lda tile_oneway,x
+        bne ?trans
+        lda tile_halfh,x
         bne ?trans
         lda r_tile
         cmp #TILE_SWITCH_OFF
@@ -387,8 +439,16 @@ is_pal  dta 0
 ?trans  lda #BLT_TRANS      ; transparent (skip index 0)
 ?setm   sta MEMW+[VRAM_BCB&$FFF]+20
         jsr run_blit
-?skip   rts
+        rts
+bt_is_bg dta 0
 .endp
+
+; Tile BG override table (max 8 entries)
+MAX_TILE_BG = 8
+tile_bg_cnt dta 0
+tile_bg_col .ds MAX_TILE_BG
+tile_bg_row .ds MAX_TILE_BG
+tile_bg_tid .ds MAX_TILE_BG
 
 ; ============================================
 ; BLIT SPRITE (transparent — color 0 = see-through)

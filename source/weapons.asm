@@ -11,8 +11,8 @@ CH              = $02FC         ; OS keyboard shadow register ($FF = no key)
 ; Weapon property tables (indexed by weapon 0-6)
 ; Key 1 = fist (upgrades to chainsaw when picked up)
 weap_dmg
-        dta 2                   ; WP_FIST (3 with chainsaw)
-        dta 1                   ; WP_PISTOL
+        dta 1                   ; WP_FIST
+        dta 2                   ; WP_PISTOL
         dta 5                   ; WP_SHOTGUN (DOOM: 7x pistol)
         dta 1                   ; WP_CHAINGUN (fast fire)
         dta 10                  ; WP_ROCKET (+splash)
@@ -186,12 +186,26 @@ wk_key  dta 0
 ?hok    sta en_hp,x
         lda #8
         sta en_pain_tmr,x
-        lda en_hp,x
+        ; Alert hit enemy and face player
+        lda #1
+        sta en_cooldown,x
+        lda enxhi,x
+        cmp zpx_hi
+        bcc ?fr
+        bne ?fl
+        lda en_x,x
+        cmp zpx
+        bcc ?fr
+?fl     lda #1
+        sta en_dir,x
+        jmp ?chk
+?fr     lda #0
+        sta en_dir,x
+?chk    lda en_hp,x
         bne ?alive
         jsr start_enemy_death
         jsr play_enemy_death
-?alive  ; Face enemy
-        jsr alert_enemies_sound
+?alive  jsr alert_enemies_sound
         rts
 ?nx     inx
         cpx #MAX_ENEMIES

@@ -68,6 +68,7 @@
         sta hs_cur
         tay
         lda (ztptr),y
+        bmi ?r_open             ; bit 7 = BG, passable
         tax
         lda tile_solid,x
         beq ?r_open
@@ -88,6 +89,7 @@
         sta hs_cur
         tay
         lda (ztptr),y
+        bmi ?l_open             ; bit 7 = BG, passable
         tax
         lda tile_solid,x
         beq ?l_open
@@ -140,7 +142,23 @@ hs_dmg  dta 0
 ?hok    sta en_hp,x
         lda #8
         sta en_pain_tmr,x
-        lda en_hp,x
+        ; Alert enemy and face player on hit
+        lda #1
+        sta en_cooldown,x
+        ; Face toward player: compare X positions
+        lda enxhi,x
+        cmp zpx_hi
+        bcc ?face_r             ; enemy left of player → face right
+        bne ?face_l             ; enemy right of player → face left
+        lda en_x,x
+        cmp zpx
+        bcc ?face_r
+?face_l lda #1
+        sta en_dir,x
+        jmp ?chk_hp
+?face_r lda #0
+        sta en_dir,x
+?chk_hp lda en_hp,x
         bne ?done
         ; Killed!
         jsr start_enemy_death

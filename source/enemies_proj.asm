@@ -71,7 +71,22 @@
         ; Pain sprite
         lda #6
         sta en_pain_tmr,x
-        ; Knockback from hit (use proj_vx direction)
+        ; Alert enemy and face player on hit
+        lda #1
+        sta en_cooldown,x
+        lda enxhi,x
+        cmp zpx_hi
+        bcc ?face_r
+        bne ?face_l
+        lda en_x,x
+        cmp zpx
+        bcc ?face_r
+?face_l lda #1
+        sta en_dir,x
+        jmp ?kb
+?face_r lda #0
+        sta en_dir,x
+?kb     ; Knockback from hit (use proj_vx direction)
         lda proj_vx,y
         bmi ?kb_l
         ; Knockback right
@@ -90,8 +105,9 @@
         bcs ?kb_s
         lda #$FC
 ?kb_s   sta envelx,x
-        ; Play pain sound (clobbers X/Y)
-        lda #SFX_OOF
+        ; Play pain sound per enemy type (clobbers X/Y)
+        ldy en_type,x
+        lda en_pain_sfx,y
         jsr play_sfx_unlock
         ; Destroy projectile
         ldy zcp_proj
@@ -163,8 +179,9 @@
 .endp
 
 ; Turn counter for stuck detection
-en_tcnt      dta 0,0,0,0,0,0    ; MAX_ENEMIES = 6
-en_pain_tmr  dta 0,0,0,0,0,0    ; pain sprite timer
+en_tcnt      :MAX_ENEMIES dta 0  ; turn counter for stuck detection
+en_dodge     :MAX_ENEMIES dta 0  ; dodge timer (walk opposite dir when stuck)
+en_pain_tmr  :MAX_ENEMIES dta 0 ; pain sprite timer
 
 ; ============================================
 ; ENEMY PROJECTILES (imp fireball etc.)
@@ -241,6 +258,8 @@ eproj_spr .ds MAX_EPROJ       ; sprite index
         lda en_type,y
         cmp #EN_CACO
         beq ?caco_fb
+        cmp #EN_BARON
+        beq ?baron_fb
         ; Imp fireball: 20 damage, red sprite
         lda #20
         sta eproj_dmg,x
@@ -251,6 +270,12 @@ eproj_spr .ds MAX_EPROJ       ; sprite index
         lda #15
         sta eproj_dmg,x
         lda #SPR_CACO_FIRE1
+        sta eproj_spr,x
+        rts
+?baron_fb ; Baron fireball: 40 damage, green sprite
+        lda #40
+        sta eproj_dmg,x
+        lda #SPR_BARON_FIRE1
         sta eproj_spr,x
         rts
 ep_eidx dta 0
@@ -264,6 +289,8 @@ ep_eidx dta 0
         jmp ?nx
 ?upd    ; Animate sprite (toggle frame every 4 frames)
         lda eproj_spr,x
+        cmp #SPR_BARON_FIRE1
+        bcs ?baron_anim
         cmp #SPR_CACO_FIRE1
         bcs ?caco_anim
         ; Imp fireball animation
@@ -284,6 +311,16 @@ ep_eidx dta 0
         sta eproj_spr,x
         jmp ?move
 ?cf1    lda #SPR_CACO_FIRE1
+        sta eproj_spr,x
+        jmp ?move
+?baron_anim
+        lda zfr
+        and #$04
+        beq ?bf1
+        lda #SPR_BARON_FIRE2
+        sta eproj_spr,x
+        jmp ?move
+?bf1    lda #SPR_BARON_FIRE1
         sta eproj_spr,x
 ?move   ; Update 16-bit X
         lda eproj_x,x

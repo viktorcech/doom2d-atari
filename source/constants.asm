@@ -58,11 +58,20 @@ SFX_SWTCHN     = 28
 SFX_SWTCHX     = 29
 SFX_CLAW       = 30
 SFX_SGTATK     = 31
+SFX_SKLATK     = 32
+SFX_FIRXPL     = 33
+SFX_DMPAIN     = 34
+SFX_SGCOCK     = 35
+SFX_IMPSIT2    = 36
+SFX_PODEATH2   = 37
+SFX_PODEATH3   = 38
+SFX_PSTOP      = 39
 
 TILE_SWITCH_OFF = 28
 TILE_SWITCH_ON  = 29
 TILE_EXIT_SW_OFF = 30
 TILE_EXIT_SW_ON  = 31
+TILE_SOLIDFLR    = 43
 
 ; --- Switch target system ---
 MAX_SWITCHES    = 4
@@ -72,6 +81,7 @@ SW_ACT_ELEV     = 2             ; call elevator (future)
 SW_ACT_DOOR_LOCK = 3            ; pickup opens door (spacebar locked)
 SW_ACT_FLOOR    = 4             ; floor trigger opens door (step on tile)
 SW_ACT_EXIT     = 5             ; exit switch — advance to next level
+SW_ACT_TRAP     = 6             ; remove wall + wake sleeping enemies nearby
 
 ; --- VBXE registers ---
 VBXE_VCTL       = $D640
@@ -148,7 +158,7 @@ JUMPF           = 8
 MAXFALL         = 3
 COYOTE          = 3             ; coyote time (frames after leaving edge)
 MAX_PROJ        = 4
-MAX_ENEMIES     = 6
+MAX_ENEMIES     = 50
 MAX_PICKUPS     = 12
 
 ; --- Pickup types ---
@@ -176,14 +186,24 @@ PK_ARMORBONUS   = 20
 NUM_PK_TYPES    = 21
 
 ; --- Decoration ---
-MAX_DECOR       = 8
+MAX_DECOR       = 16
 DC_BARREL       = 0
 DC_TORCH        = 1
 DC_PILLAR       = 2
 DC_LAMP         = 3
 DC_DEADGUY      = 4
 DC_TECHTHING    = 5
-NUM_DC_TYPES    = 6
+DC_EVILEYE      = 6             ; evil eye symbol (CEYEA0)
+DC_SKULPILLAR   = 7             ; red pillar with skull (SMITA0)
+DC_ELECLAMP     = 8             ; tall tech lamp (ELECA0)
+DC_DEADTREE     = 9             ; dead tree (TRE1A0)
+DC_BROWNTREE    = 10            ; brown tree (TRE2A0)
+DC_HANGBODY     = 11            ; hanging body (GOR2A0)
+DC_HANGLEG      = 12            ; hanging leg (GOR3A0)
+DC_IMPALED      = 13            ; impaled human (POL1A0)
+DC_SKULLPILE    = 14            ; pile of skulls (POL4A0)
+DC_REDTORCH     = 15            ; short red torch, animated (TREDA0-D0)
+NUM_DC_TYPES    = 16
 
 ; Barrel
 BARREL_HP       = 3             ; hits to explode

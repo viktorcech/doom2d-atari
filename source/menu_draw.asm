@@ -125,20 +125,28 @@
 .proc redraw_both
         jsr clear_menu_area
         lda draw_mode
-        bne ?sett
-        jsr draw_menu
+        beq ?menu
+        cmp #2
+        beq ?cred
+        jsr draw_settings
         jmp ?buf2
-?sett   jsr draw_settings
+?cred   jsr draw_credits
+        jmp ?buf2
+?menu   jsr draw_menu
 ?buf2   jsr wait_blit
         lda zbuf_hi
         eor #SCR1_HI
         sta zbuf_hi
         jsr clear_menu_area
         lda draw_mode
-        bne ?sett2
-        jsr draw_menu
+        beq ?menu2
+        cmp #2
+        beq ?cred2
+        jsr draw_settings
         jmp ?done
-?sett2  jsr draw_settings
+?cred2  jsr draw_credits
+        jmp ?done
+?menu2  jsr draw_menu
 ?done   jsr wait_blit
         lda zbuf_hi
         eor #SCR1_HI
@@ -336,6 +344,108 @@ dt_y    dta 0
 .endp
 
 ; ============================================
+; DRAW CREDITS
+; ============================================
+.proc draw_credits
+        lda #<txt_cr1
+        sta txt_ptr
+        lda #>txt_cr1
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #74
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr2
+        sta txt_ptr
+        lda #>txt_cr2
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #84
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr3
+        sta txt_ptr
+        lda #>txt_cr3
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #94
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr4
+        sta txt_ptr
+        lda #>txt_cr4
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #108
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr5
+        sta txt_ptr
+        lda #>txt_cr5
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #118
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr6
+        sta txt_ptr
+        lda #>txt_cr6
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #132
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr7
+        sta txt_ptr
+        lda #>txt_cr7
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #142
+        sta zdy
+        jsr draw_text
+
+        lda #<txt_cr8
+        sta txt_ptr
+        lda #>txt_cr8
+        sta txt_ptr+1
+        lda #88
+        sta zdx
+        lda #0
+        sta zdxh
+        lda #152
+        sta zdy
+        jsr draw_text
+        rts
+.endp
+
+; ============================================
 ; UPDATE MENU (joystick + keyboard)
 ; ============================================
 .proc update_menu
@@ -474,3 +584,11 @@ txt_snd_lbl dta c'SOUND   ',0
 txt_on  dta c'ON      ',0
 txt_off dta c'OFF     ',0
 txt_empty dta c'        ',0
+txt_cr1 dta c'DOOM 2D  ATARI 8BIT',0
+txt_cr2 dta c'ORIGINAL DOOM 2D PC',0
+txt_cr3 dta c'PRIKOL SOFTWARE 1996',0
+txt_cr4 dta c'DOOM BY ID SOFTWARE',0
+txt_cr5 dta c'D2D FOREVER COMMUNITY',0
+txt_cr6 dta c'ATARI PORT  W1K',0
+txt_cr7 dta c'TOOLS MADS ALTIRRA',0
+txt_cr8 dta c'ATARI 800XL VBXE',0

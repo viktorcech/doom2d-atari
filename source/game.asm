@@ -10,6 +10,13 @@
         lda #0
         sta zfr
         sta level_complete
+        ; 2026-04-08: init end-level stats
+        sta stat_kills
+        sta stat_time_lo
+        sta stat_time_hi
+        sta stat_frames
+        lda num_en
+        sta stat_total_en       ; remember total enemies for % calc
         jsr init_player
         jsr init_enemies
         jsr init_pickups
@@ -180,6 +187,19 @@ tile_solid
         dta 0                ; 29 = switch ON (passable, on wall)
         dta 0                ; 30 = exit switch OFF (passable)
         dta 0                ; 31 = exit switch ON (passable)
+        ; New tiles 32-42 (VRAM $060400+):
+        dta 1                ; 32 = BOX01 (wall)
+        dta 1                ; 33 = BOX02 (wall)
+        dta 1                ; 34 = COMP02 (wall)
+        dta 1                ; 35 = COMP04 (wall)
+        dta 1                ; 36 = COMP05 (wall)
+        dta 1                ; 37 = WALL009 (wall)
+        dta 1                ; 38 = WALL020 (wall)
+        dta 1                ; 39 = WALL024 (wall)
+        dta 1                ; 40 = WALL026 (wall)
+        dta 1                ; 41 = WALL027 (wall)
+        dta 1                ; 42 = WALL028 (wall)
+        dta 1                ; 43 = solid floor (half-height, solid)
 
 ; ============================================
 ; ONE-WAY PLATFORM TABLE
@@ -207,6 +227,19 @@ tile_oneway
         dta 0                ; 29 = switch ON (not one-way)
         dta 0                ; 30 = exit switch OFF (not one-way)
         dta 0                ; 31 = exit switch ON (not one-way)
+        ; New tiles 32-42:
+        dta 0                ; 32 = BOX01 (not one-way)
+        dta 0                ; 33 = BOX02 (not one-way)
+        dta 0                ; 34 = COMP02 (not one-way)
+        dta 0                ; 35 = COMP04 (not one-way)
+        dta 0                ; 36 = COMP05 (not one-way)
+        dta 0                ; 37 = WALL009 (not one-way)
+        dta 0                ; 38 = WALL020 (not one-way)
+        dta 0                ; 39 = WALL024 (not one-way)
+        dta 0                ; 40 = WALL026 (not one-way)
+        dta 0                ; 41 = WALL027 (not one-way)
+        dta 0                ; 42 = WALL028 (not one-way)
+        dta 0                ; 43 = solid floor (not one-way)
 
 ; ============================================
 ; HALF-HEIGHT TILE TABLE
@@ -219,6 +252,9 @@ tile_halfh
         dta 0,0,0,0,0,0,0,0,0       ; 16-24
         dta 0,0,0                    ; 25-27 = doors
         dta 0,0                      ; 28-29 = switch OFF/ON
+        dta 0,0                      ; 30-31 = exit switch OFF/ON
+        dta 0,0,0,0,0,0,0,0,0,0,0   ; 32-42 = wall tiles
+        dta 1                        ; 43 = solid floor (half-height)
 
 ; ============================================
 ; CHECK IF TILE AT (gt_px, gt_py) IS SOLID
@@ -226,9 +262,12 @@ tile_halfh
 ; ============================================
 .proc check_solid
         jsr get_tile_at
+        bmi ?pass           ; bit 7 = BG variant, always passable
         tax
         lda tile_solid,x
         rts                 ; A!=0 means solid
+?pass   lda #0
+        rts
 .endp
 
 ; ============================================
@@ -238,12 +277,15 @@ tile_halfh
 ; ============================================
 .proc check_solid_or_platform
         jsr get_tile_at
+        bmi ?pass           ; bit 7 = BG variant, always passable
         tax
         lda tile_oneway,x
         bne ?plat           ; one-way tile = solid when falling
         lda tile_solid,x
         rts
 ?plat   lda #1              ; one-way = solid when falling
+        rts
+?pass   lda #0
         rts
 .endp
 

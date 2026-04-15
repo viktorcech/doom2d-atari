@@ -235,9 +235,7 @@ scan_any_1     dta 0
         ldy #0
         lda (ztptr),y
         beq ?empty
-        cmp #15
-        beq ?empty             ; tile 15 = invisible solid (barrel), draw sky
-        ; Non-empty tile: blit it
+        ; Non-empty tile: blit it (tile 15 = barrel, handled by blit_tile BG path)
         sta r_tile
         jsr blit_tile
         ; Restore map bank after blitter changed it

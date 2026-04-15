@@ -70,13 +70,14 @@ uc_cnt    dta 0
 uc_lastpg dta 0
 
 ;==============================================
-; MAP + FIREBALL UPLOAD (bank $1E: map 1024B + imp 128B + caco 128B)
+; MAP + FIREBALL UPLOAD (bank $1E: map 1024B + imp 128B + caco 128B + baron 128B)
 ;==============================================
         org $6000
 map_bin_data
         ins '../data/map1.bin'
         ins '../data/imp_fireball.bin'
         ins '../data/caco_fireball.bin'
+        ins '../data/baron_fireball.bin'
 
         org $0580
 .proc upload_map
@@ -88,7 +89,7 @@ map_bin_data
         sta uc_bank
         lda #1
         sta uc_cnt
-        lda #5                  ; 1280 bytes (map 1024 + imp 128 + caco 128) = 5 pages
+        lda #6                  ; 1408 bytes (map 1024 + imp 128 + caco 128 + baron 128) = 6 pages
         sta uc_lastpg
         jsr generic_upload
         rts
@@ -294,8 +295,8 @@ spritesheet_c5
         ini upload_chunk5
 
 ;==============================================
-; SWITCH TILES 28-29 at VRAM $060000 (bank $60)
-; Own chunk, no conflicts
+; SWITCH + NEW TILES at VRAM $060000 (bank $60)
+; 28-31: switches, 32-42: new wall textures
 ;==============================================
         org $6000
 switch_tiles
@@ -303,6 +304,7 @@ switch_tiles
         ins '../data/switch_on.bin'
         ins '../data/switch3_off.bin'
         ins '../data/switch3_on.bin'
+        ins '../data/new_tiles.bin'
         org $0580
 .proc upload_switch_tiles
         lda #<switch_tiles
@@ -313,7 +315,7 @@ switch_tiles
         sta uc_bank
         lda #1
         sta uc_cnt
-        lda #4
+        lda #15
         sta uc_lastpg
         jsr generic_upload
         rts
@@ -342,7 +344,9 @@ spritesheet_c6
 .endp
         ini upload_chunk6
 
-; --- Chunk 7: player pain sprites (bank $51 = VRAM $051000) ---
+; --- Chunk 7: pain sprites (bank $52 = VRAM $052000) ---
+; pl, pl_L, zombie, zombie_L, shotgun, shotgun_L, imp, imp_L,
+; pinky, pinky_L, caco, caco_L, baron, baron_L (14 x 512B = 7168B)
         org $6000
 spritesheet_c7
         ins '../data/pain_sprites.bin'
@@ -353,20 +357,67 @@ spritesheet_c7
         sta zsrc
         lda #>spritesheet_c7
         sta zsrc+1
-        lda #BANK_EN+$51
+        lda #BANK_EN+$58
         sta uc_bank
-        lda #1
+        lda #2
         sta uc_cnt
-        lda #8                  ; 2048 bytes = 8 pages
+        lda #16                 ; 7168 bytes = 2 banks, last 16 pages
         sta uc_lastpg
         jsr generic_upload
         rts
 .endp
         ini upload_chunk7
 
+; --- Chunk 8: new decoration sprites (bank $54 = VRAM $054000) ---
+; column, skulpillar, eleclamp, deadtree, browntree, hangbody, hangleg,
+; impaled, skullpile, redtorch1-4 (6144B = 1 full bank + 8 pages)
+        org $6000
+spritesheet_c8
+        ins '../data/spritesheet_decor.bin'
+
+        org $0580
+.proc upload_chunk8
+        lda #<spritesheet_c8
+        sta zsrc
+        lda #>spritesheet_c8
+        sta zsrc+1
+        lda #BANK_EN+$54
+        sta uc_bank
+        lda #2              ; 2 banks: $54 (full) + $55 (partial)
+        sta uc_cnt
+        lda #8              ; last bank: 8 pages (2048 bytes)
+        sta uc_lastpg
+        jsr generic_upload
+        rts
+.endp
+        ini upload_chunk8
+
+; --- Chunk 9: Lost Soul sprites (bank $56-$57 = VRAM $056000-$057FFF) ---
+; 16 sprites x 512B = 8192B = 2 full banks
+        org $6000
+spritesheet_c9
+        ins '../data/spritesheet_lostsoul.bin'
+
+        org $0580
+.proc upload_chunk9
+        lda #<spritesheet_c9
+        sta zsrc
+        lda #>spritesheet_c9
+        sta zsrc+1
+        lda #BANK_EN+$56
+        sta uc_bank
+        lda #2              ; 2 banks: $56 (full) + $57 (full)
+        sta uc_cnt
+        lda #16             ; last bank: full 16 pages
+        sta uc_lastpg
+        jsr generic_upload
+        rts
+.endp
+        ini upload_chunk9
+
 ;==============================================
-; BACKGROUND SKY UPLOAD (320x200 = 64000 bytes, VRAM $034000+)
-; 6 chunks of max 12KB each
+; SKY UPLOAD TO VRAM $034000+ (banks $34-$43)
+; Static upload at boot — 6 chunks, 64000 bytes total
 ;==============================================
 
 ; --- Sky chunk 1: 12288 bytes (banks $34-$36) ---
@@ -378,7 +429,7 @@ sky_c1  ins '../data/sky_c1.bin'
         sta zsrc
         lda #>sky_c1
         sta zsrc+1
-        lda #BANK_EN+BANK_BG
+        lda #BANK_EN+$34
         sta uc_bank
         lda #3
         sta uc_cnt
@@ -589,11 +640,30 @@ snd_c5  ins '../data/snd_c5.bin'
         sta zsrc+1
         lda #BANK_EN+$50
         sta uc_bank
-        lda #1
+        lda #3
         sta uc_cnt
-        lda #5                  ; 1166 bytes: ceil(1166/256) = 5 pages
+        lda #16                 ; snd_c5: 3 banks ($50-$52), full (12288B)
         sta uc_lastpg
         jsr generic_upload
         rts
 .endp
         ini upload_snd5
+
+        org $6000
+snd_c6  ins '../data/snd_c6.bin'
+        org $0580
+.proc upload_snd6
+        lda #<snd_c6
+        sta zsrc
+        lda #>snd_c6
+        sta zsrc+1
+        lda #BANK_EN+$53
+        sta uc_bank
+        lda #1
+        sta uc_cnt
+        lda #13                 ; snd_c6: 1 bank ($53), 13 pages (3176B)
+        sta uc_lastpg
+        jsr generic_upload
+        rts
+.endp
+        ini upload_snd6

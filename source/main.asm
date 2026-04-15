@@ -18,8 +18,8 @@
         org $0600
 .proc early_init
         lda #0
-        sta SDMCTL          ; disable ANTIC DMA
-        sta $D400           ; DMACTL shadow
+        sta SDMCTL          ; disable ANTIC DMA (OS shadow)
+        sta $D400           ; DMACTL hardware register
         sta COLOR4          ; black background
         rts
 .endp
@@ -27,18 +27,7 @@
 
 ;==============================================
 ; MEMAC-B READ TRAMPOLINE (must live below $4000!)
-;
-; VBXE MEMAC-B maps the CPU address range $4000-$7FFF to VRAM
-; when enabled. Game code and variables also live in $4000-$7FFF,
-; so MEMAC-B must only be enabled for the absolute minimum time.
-;
-; This trampoline at $0610 (safely below $4000):
-;   1. Enables MEMAC-B → $4000-$7FFF now reads from VRAM
-;   2. Reads one byte from (snd_ptr) which points into $4000-$7FFF
-;   3. Disables MEMAC-B → $4000-$7FFF back to normal RAM
-;
-; Called from the sound IRQ handler (snd_irq) to fetch the next
-; PCM sample byte from VRAM sound data.
+; Used by snd_play (pre-read), snd_irq Phase 0 fallback, snd_poll.
 ;==============================================
         org $0610
 snd_memac_read
@@ -146,7 +135,7 @@ s_edev  dta c'E:',$9B
         and #$0E            ; bits 1-3
         sta is_pal          ; 0=NTSC, non-zero=PAL
 
-        ; Digital sound engine init (Timer 1 IRQ + AUDC4)
+        ; Digital sound engine init (POKEY + Timer 1 IRQ hook)
         jsr snd_init
 
         ; Init double buffer: draw to screen 1, display screen 0
@@ -183,7 +172,14 @@ s_edev  dta c'E:',$9B
 ?next_level
         lda #0
         sta level_complete
+        ; 2026-04-08: reset stats for new level
+        sta stat_kills
+        sta stat_time_lo
+        sta stat_time_hi
+        sta stat_frames
         jsr load_level
+        lda num_en
+        sta stat_total_en       ; set correct enemy count for this level
         jsr init_enemies
         jsr init_pickups
         jsr init_decorations
@@ -241,34 +237,61 @@ s_edev  dta c'E:',$9B
         sta $02FC               ; clear key
         jsr menu_pause
         cmp #1
-        beq ?new_game           ; A=1: user chose New Game
-        cmp #2
-        beq ?loaded_game        ; A=2: user loaded a save
+        bne ?not_ng
+        jmp ?new_game           ; A=1: user chose New Game
+?not_ng cmp #2
+        bne ?no_esc
+        jmp ?loaded_game        ; A=2: user loaded a save
 ?no_esc
         inc zfr                 ; global frame counter (used for animations)
+
+        ; 2026-04-08: Level timer (count frames → seconds)
+        inc stat_frames
+        lda stat_frames
+        ldx is_pal
+        bne ?pal_thr
+        cmp #60                 ; NTSC = 60 fps
+        bcc ?no_sec
+        bcs ?sec_ok
+?pal_thr
+        cmp #50                 ; PAL = 50 fps
+        bcc ?no_sec
+?sec_ok
+        lda #0
+        sta stat_frames
+        inc stat_time_lo
+        bne ?no_sec
+        inc stat_time_hi
+?no_sec
 
         ; --- LOGIC PHASE ---
         jsr read_input
         lda zphp
         bne ?alive
         jsr player_dead         ; death animation (no player control)
+        jsr snd_poll            ; 2026-04-08: deferred VRAM read
         jsr update_enemies
         jsr update_decorations
         jmp ?skip_logic
 ?alive
         jsr player_update
+        jsr snd_poll            ; 2026-04-08: deferred VRAM read (1 of 3 in logic phase)
         jsr update_enemies
         jsr proj_update         ; player projectiles
         jsr eproj_update        ; enemy projectiles (imp/caco fireballs)
+        jsr snd_poll            ; 2026-04-08: deferred VRAM read (2 of 3)
         jsr update_pickups
         jsr update_decorations
         jsr update_doors
         jsr update_switches
         jsr check_floor_triggers
+        jsr snd_poll            ; 2026-04-08: deferred VRAM read (3 of 3)
         jsr sound_update
         ; --- EXIT SWITCH CHECK ---
         lda level_complete
         beq ?no_exit
+        ; 2026-04-08: Show end-level stats before advancing
+        jsr show_level_stats
         ; Advance to next level (wrap if last)
         inc current_level
         lda current_level
@@ -296,10 +319,14 @@ s_edev  dta c'E:',$9B
         jsr render_hud
 
         ; --- SYNC PHASE ---
-        jsr wait_blit           ; ensure all blitter ops finished
+        jsr wait_blit           ; 2026-04-08: also does deferred VRAM reads via snd_poll
 
-        lda RTCLOK3             ; wait for VBLANK (next frame)
-?vsync  cmp RTCLOK3
+        ; 2026-04-08: VBLANK wait with deferred VRAM reads
+        lda RTCLOK3
+?vsync  pha
+        jsr snd_poll            ; do pending VRAM read during dead time
+        pla
+        cmp RTCLOK3
         beq ?vsync
 
         ; Show the back buffer by updating XDL overlay address
@@ -360,7 +387,12 @@ no_vbxe_len = *-no_vbxe_msg
         ldx #0
 ?lp     cpx num_en
         bcs ?done
-        lda #1
+        lda enemy_spawn_sleep,x
+        beq ?awake
+        lda #3                  ; sleeping
+        jmp ?set_act
+?awake  lda #1                  ; alive
+?set_act
         sta en_act,x
         lda enemy_spawn_type,x
         sta en_type,x
@@ -380,6 +412,7 @@ no_vbxe_len = *-no_vbxe_msg
         sta envely,x
         sta en_gib,x
         sta en_tcnt,x
+        sta en_dodge,x
         sta envelx,x
         sta en_pain_tmr,x
         sta en_dtimer,x

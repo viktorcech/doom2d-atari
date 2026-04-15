@@ -24,14 +24,34 @@ dc_wtab
         dta 16                   ; DC_LAMP
         dta 16                   ; DC_DEADGUY
         dta 16                   ; DC_TECHTHING
+        dta 16                   ; DC_EVILEYE
+        dta 16                   ; DC_SKULPILLAR
+        dta 16                   ; DC_ELECLAMP
+        dta 16                   ; DC_DEADTREE
+        dta 16                   ; DC_BROWNTREE
+        dta 16                   ; DC_HANGBODY
+        dta 16                   ; DC_HANGLEG
+        dta 16                   ; DC_IMPALED
+        dta 16                   ; DC_SKULLPILE
+        dta 16                   ; DC_REDTORCH
 
 dc_htab
         dta 16                   ; DC_BARREL
         dta 32                   ; DC_TORCH (tall)
         dta 32                   ; DC_PILLAR (tall)
-        dta 16                   ; DC_LAMP
+        dta 32                   ; DC_LAMP (tall)
         dta 16                   ; DC_DEADGUY
         dta 16                   ; DC_TECHTHING
+        dta 32                   ; DC_EVILEYE
+        dta 32                   ; DC_SKULPILLAR
+        dta 32                   ; DC_ELECLAMP
+        dta 32                   ; DC_DEADTREE
+        dta 32                   ; DC_BROWNTREE
+        dta 32                   ; DC_HANGBODY
+        dta 16                   ; DC_HANGLEG
+        dta 32                   ; DC_IMPALED
+        dta 16                   ; DC_SKULLPILE
+        dta 32                   ; DC_REDTORCH
 
 ; Solid flag: 1 = blocks movement (player can't walk through)
 dc_solid
@@ -41,6 +61,16 @@ dc_solid
         dta 0                    ; DC_LAMP: pass through
         dta 0                    ; DC_DEADGUY: pass through
         dta 0                    ; DC_TECHTHING: pass through
+        dta 1                    ; DC_EVILEYE: solid
+        dta 1                    ; DC_SKULPILLAR: solid
+        dta 0                    ; DC_ELECLAMP: pass through
+        dta 1                    ; DC_DEADTREE: solid
+        dta 1                    ; DC_BROWNTREE: solid
+        dta 0                    ; DC_HANGBODY: pass through (ceiling)
+        dta 0                    ; DC_HANGLEG: pass through (ceiling)
+        dta 0                    ; DC_IMPALED: pass through
+        dta 0                    ; DC_SKULLPILE: pass through
+        dta 0                    ; DC_REDTORCH: pass through
 
 ; Decoration type -> sprite index
 dc_spr_tab
@@ -50,6 +80,16 @@ dc_spr_tab
         dta 59                   ; DC_LAMP       -> lamp
         dta 0                    ; DC_DEADGUY    -> TODO
         dta 0                    ; DC_TECHTHING  -> TODO
+        dta SPR_DECOR_EVILEYE    ; DC_EVILEYE     -> evil eye
+        dta SPR_DECOR_SKULPILLAR ; DC_SKULPILLAR -> skull pillar
+        dta SPR_DECOR_ELECLAMP   ; DC_ELECLAMP   -> electric lamp
+        dta SPR_DECOR_DEADTREE   ; DC_DEADTREE   -> dead tree
+        dta SPR_DECOR_BROWNTREE  ; DC_BROWNTREE  -> brown tree
+        dta SPR_DECOR_HANGBODY   ; DC_HANGBODY   -> hanging body
+        dta SPR_DECOR_HANGLEG    ; DC_HANGLEG    -> hanging leg
+        dta SPR_DECOR_IMPALED    ; DC_IMPALED    -> impaled human
+        dta SPR_DECOR_SKULLPILE  ; DC_SKULLPILE  -> skull pile
+        dta SPR_DECOR_REDTORCH1  ; DC_REDTORCH   -> red torch (frame 1)
 
 ; init_decorations is in the overlay segment (end of main.asm)
 
@@ -86,9 +126,19 @@ dc_spr_tab
         beq ?nx2
 ?draw   ldx rd_idx
         lda dc_type,x
+        cmp #DC_REDTORCH
+        beq ?anim
         tax
         lda dc_spr_tab,x
-        jsr blit_sprite
+        jmp ?blit
+?anim   lda zfr
+        lsr
+        lsr
+        lsr                      ; zfr >> 3
+        and #3                   ; & 3 -> frame 0-3
+        clc
+        adc #SPR_DECOR_REDTORCH1
+?blit   jsr blit_sprite
 ?nx2    ldx rd_idx
 ?nx     inx
         cpx #MAX_DECOR
@@ -101,13 +151,20 @@ rd_idx  dta 0
 ; RENDER DECORATIONS - NO DIRTY (per-frame static redraw)
 ; ============================================
 .proc render_decor_nodirty
-        lda dirty_any
-        beq ?skip
         ldx #0
 ?lp     lda dc_act,x
         cmp #1
-        bne ?nx
+        beq ?vis
+        jmp ?nx                 ; was bne ?nx (out of range)
+?vis
         stx rn_idx
+        ; Animated decorations (red torch) always redraw
+        lda dc_type,x
+        cmp #DC_REDTORCH
+        beq ?force_draw
+        ; Static decorations: only redraw if inside dirty bbox
+        lda dirty_any
+        beq ?nx_jmp
         lda dc_xhi,x
         asl
         asl
@@ -121,11 +178,39 @@ rd_idx  dta 0
         lsr
         ora rn_tc
         cmp dirty_min_col
-        bcc ?nx2
+        bcs ?col_min_ok
+        jmp ?nx2
+?col_min_ok
         cmp dirty_max_col
         beq ?col_ok
-        bcs ?nx2
+        bcc ?col_ok
+        jmp ?nx2
 ?col_ok lda dc_type,x
+        tay
+        jmp ?row_chk
+?force_draw
+        ; Red torch: mark dirty + draw every frame
+        ldx rn_idx
+        lda dc_type,x
+        tay
+        lda dc_y,x
+        sec
+        sbc dc_htab,y
+        bcc ?nx_jmp
+        sta zdy
+        lda dc_x,x
+        sta zdx
+        lda dc_xhi,x
+        sta zdxh
+        lda dc_wtab,y
+        sta md_w
+        lda dc_htab,y
+        sta md_h
+        jsr mark_dirty_sprite
+        jmp ?do_draw             ; skip bbox check, go straight to draw
+?nx_jmp jmp ?nx2
+?row_chk
+        lda dc_type,x
         tay
         lda dc_y,x
         sec
@@ -151,15 +236,27 @@ rd_idx  dta 0
         sec
         sbc dc_htab,y
         sta zdy
+?do_draw
         ldx rn_idx
         lda dc_type,x
+        cmp #DC_REDTORCH
+        beq ?anim
         tax
         lda dc_spr_tab,x
-        jsr blit_sprite
+        jmp ?blit
+?anim   lda zfr
+        lsr
+        lsr
+        lsr
+        and #3
+        clc
+        adc #SPR_DECOR_REDTORCH1
+?blit   jsr blit_sprite
 ?nx2    ldx rn_idx
 ?nx     inx
         cpx #MAX_DECOR
-        bne ?lp
+        beq ?skip
+        jmp ?lp                 ; was bne ?lp (out of range)
 ?skip   rts
 rn_idx  dta 0
 rn_tc   dta 0

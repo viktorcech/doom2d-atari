@@ -8,10 +8,6 @@
 
 .proc enemy_do_attack
         ; --- Attack logic ---
-        lda en_type,x
-        cmp #EN_BARON
-        bne ?atk_check
-        rts                    ; baron has no attack here
 ?atk_check
         lda en_atk,x
         beq ?do_attack
@@ -30,9 +26,37 @@
         bcc ?in_range
         rts                    ; too far vertically, skip
 ?in_range
-        ; Pinky: melee only (must be close)
+        ; Lost Soul: charge melee (like Pinky but flies)
         lda en_type,x
-        cmp #EN_PINKY
+        cmp #EN_LOSTSOUL
+        bne ?not_lostsoul
+        ; Check X distance for melee range (|en_x - zpx| < 20)
+        lda en_x,x
+        sec
+        sbc zpx
+        bpl ?ls_xp
+        eor #$FF
+        clc
+        adc #1
+?ls_xp  cmp #20
+        bcs ?ls_no            ; too far for melee
+        ; Lost Soul charge hit! 10 damage
+        lda #10
+        jsr player_take_damage
+        lda #SFX_SKLATK
+        jsr play_sfx_unlock
+        ; Cooldown: 30-45 frames
+        lda zfr
+        eor RTCLOK3
+        and #$0F
+        clc
+        adc #30
+        sta en_atk,x
+        rts
+?ls_no  rts
+?not_lostsoul
+        ; Pinky: melee only (must be close)
+        cmp #EN_PINKY          ; A still has en_type from lostsoul check
         bne ?not_pinky
         ; Check X distance for melee range (|en_x - zpx| < 20)
         lda en_x,x
@@ -72,12 +96,28 @@
         ; Caco cooldown: 50-80 frames (~0.8-1.3s)
         lda zfr
         eor RTCLOK3
-        and #$1F
+        and #$0F
         clc
         adc #50
         sta en_atk,x
         rts
 ?not_caco
+        ; Baron: fireball (high damage, reuses caco fireball sprite)
+        lda en_type,x
+        cmp #EN_BARON
+        bne ?not_baron
+        jsr spawn_eproj
+        ldx zzidx
+        lda #SFX_FIRSHT
+        jsr play_sfx_unlock
+        lda zfr
+        eor RTCLOK3
+        and #$0F
+        clc
+        adc #50
+        sta en_atk,x
+        rts
+?not_baron
         ; Imp: melee if close, fireball if far
         lda en_type,x
         cmp #EN_IMP
@@ -126,7 +166,7 @@
         lda zfr
         eor RTCLOK3
         eor en_x,x
-        and #$3F
+        and #$0F
         ldy en_type,x
         clc
         adc en_cd_base,y
@@ -135,12 +175,13 @@
 
 ; Base cooldown per enemy type (indexed by EN_*)
 en_cd_base
-        dta 30              ; EN_ZOMBIE  = 0: 30-93 frames
-        dta 45              ; EN_IMP     = 1: 45-108 frames
-        dta 20              ; EN_PINKY   = 2: 20-83 frames
-        dta 50              ; EN_CACO    = 3: 50-113 frames
-        dta 40              ; EN_SHOTGUN = 4: 40-103 frames
-        dta 50              ; EN_BARON   = 5: 50-113 frames
+        dta 20              ; EN_ZOMBIE  = 0: 20-35 frames (~0.4-0.7s)
+        dta 20              ; EN_IMP     = 1: 20-35 frames
+        dta 20              ; EN_PINKY   = 2: 20-35 frames
+        dta 20              ; EN_CACO    = 3: 20-35 frames
+        dta 20              ; EN_SHOTGUN = 4: 20-35 frames
+        dta 20              ; EN_BARON   = 5: 20-35 frames
+        dta 20              ; EN_LOSTSOUL = 6: 20-35 frames
 
 ; Hitscan damage per enemy type
 en_atk_dmg
@@ -150,6 +191,7 @@ en_atk_dmg
         dta 0               ; EN_CACO: (proj only)
         dta 15              ; EN_SHOTGUN: 15 dmg (3 pellets)
         dta 0               ; EN_BARON: (proj only)
+        dta 0               ; EN_LOSTSOUL: (melee only)
 
 ; Hitscan attack SFX per enemy type
 en_atk_sfx
@@ -159,4 +201,5 @@ en_atk_sfx
         dta SFX_FIRSHT      ; EN_CACO: (unused for hitscan)
         dta SFX_SHOTGUN     ; EN_SHOTGUN: shotgun sound
         dta SFX_FIRSHT      ; EN_BARON: (unused for hitscan)
+        dta SFX_SGTATK      ; EN_LOSTSOUL: (unused for hitscan)
 .endp

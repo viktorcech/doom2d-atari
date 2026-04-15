@@ -9,9 +9,13 @@
 .proc render_enemies
         ldx #0
 ?lp     lda en_act,x
-        bne ?vis
-        jmp ?nx
-?vis    stx zzidx
+        beq ?nx_jmp
+        cmp #3
+        beq ?nx_jmp             ; sleeping = don't render
+        stx zzidx
+        jmp ?vis
+?nx_jmp jmp ?nx
+?vis
         ; Screen position
         lda en_x,x
         sta zdx
@@ -147,16 +151,13 @@
         jmp ?dopain
 ?no_epain
         ; Check if shooting (just fired: alerted + timer in shoot range)
-        lda en_type,x
-        cmp #EN_BARON
-        beq ?walk              ; baron has no shoot sprite
 ?chk_shoot
         lda en_cooldown,x
         beq ?walk              ; not alerted = no shoot sprite
         lda en_atk,x
+        beq ?walk              ; en_atk == 0: ready to fire, show walk
         cmp #15
-        bcs ?walk
-        beq ?walk
+        bcs ?walk              ; en_atk >= 15: cooldown, show walk
         lda re_base
         clc
         adc #4                 ; shoot = base + 4
@@ -186,12 +187,13 @@
         jsr mark_dirty_sprite
         pla
         ; Base sprites face LEFT, _L sprites face RIGHT
-        ; dir=0 (right) -> +MIRROR_OFFSET, dir=1 (left) -> base
+        ; dir=0 (right) -> +mirror_offset[type], dir=1 (left) -> base
         ldx zzidx
         ldy en_dir,x
         bne ?noflip
+        ldy en_type,x
         clc
-        adc #MIRROR_OFFSET
+        adc en_mirror_off,y
 ?noflip
 ?dopain jsr blit_sprite
 ?nx2    ldx zzidx

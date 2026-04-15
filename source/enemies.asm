@@ -39,6 +39,42 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         lda #0
         sta en_gib,x
         sta envelx,x
+        inc stat_kills
+        ; Drop pickup on zombie/shotgun death
+        lda en_type,x
+        beq ?drop_ammo          ; EN_ZOMBIE (0) → ammo
+        cmp #4                  ; EN_SHOTGUN
+        beq ?drop_shotgun
+        rts
+?drop_shotgun
+        lda #PK_SHOTGUN
+        jmp ?do_drop
+?drop_ammo
+        lda #PK_AMMO
+?do_drop
+        pha                     ; save pickup type
+        stx zt2
+        ldy #0
+?find   lda pk_act,y
+        beq ?slot
+        iny
+        cpy #MAX_PICKUPS
+        bcc ?find
+        pla                     ; discard type
+        ldx zt2                 ; no free slot
+        rts
+?slot   lda #1
+        sta pk_act,y
+        pla
+        sta pk_type,y
+        ldx zt2
+        lda en_x,x
+        sta pk_x,y
+        lda enxhi,x
+        sta pk_xhi,y
+        lda en_y,x
+        sta pk_y,y
+?no_drop
         rts
 .endp
 
@@ -51,10 +87,14 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
 .proc update_enemies
         ldx #0
 ?lp     lda en_act,x
-        bne ?active
-        jmp ?nx
-?active cmp #2
+        beq ?nx_jmp0
+        cmp #3
+        beq ?nx_jmp0            ; sleeping = skip update
+        cmp #2
         bne ?alive
+        jmp ?dying
+?nx_jmp0 jmp ?nx
+?dying
         ; --- Dying: count down death timer + knockback ---
         dec en_dtimer,x
         beq ?dead
@@ -106,21 +146,22 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         dec en_pain_tmr,x
 ?no_pdec
         ; --- LOS check: stagger per enemy ---
-        ; Alerted: every 2nd frame. Idle: every 4th frame.
+        ; Alerted: every 4th frame. Idle: every 8th frame.
         lda zfr
         eor zzidx
         sta zt
         lda en_cooldown,x
         bne ?alert_stagger
         lda zt
-        and #$03              ; idle: 1 of 4 frames
+        and #$07              ; idle: 1 of 8 frames
         beq ?do_los
         jmp ?grav
 ?alert_stagger
         lda zt
-        and #$01              ; alerted: 1 of 2 frames
+        and #$03              ; alerted: 1 of 4 frames
         beq ?do_los
-        jmp ?grav
+        ; Non-LOS frames: skip LOS scan, go straight to movement
+        jmp ?no_attack
 ?do_los
         ; If alerted and falling, skip LOS and keep chasing
         ; (prevents cycling on stairs when chest-height row changes)
@@ -158,12 +199,17 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         lda enxhi,x
         sbc zpx_hi
         bpl ?ppos
-        ; Result negative → negate to get absolute value
+        ; Result negative → negate 16-bit to get absolute value
+        sta los_cur+1           ; save hi byte
         lda #0
         sec
         sbc los_cur
         sta los_cur
-?ppos   bne ?no_prox            ; hi byte != 0 → distance > 255
+        lda #0
+        sbc los_cur+1
+        jmp ?chk_hi
+?ppos
+?chk_hi bne ?no_prox            ; hi byte != 0 → distance > 255
         lda los_cur
         cmp #48
         bcc ?dir_ok             ; within 48px = proximity alert!
@@ -285,6 +331,7 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         bcs ?h_clear        ; no wall found horizontally, check vertical
         tay
         lda (ztptr),y       ; tile at (column, row)
+        bmi ?scan_nx        ; bit 7 = BG, passable
         tax
         lda tile_solid,x
         beq ?scan_nx
@@ -334,9 +381,13 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         sta ztptr+1
         ldy los_ecol        ; check at enemy's column
         lda (ztptr),y
+        bmi ?v_pass         ; bit 7 = BG, passable
         tax
         lda tile_solid,x
         bne ?v_wall         ; solid tile blocks vertical LOS
+        lda tile_oneway,x
+        bne ?v_wall         ; one-way floor also blocks vertical LOS
+?v_pass
         inc los_cur
         jmp ?v_scan
 ?v_wall jmp ?idle           ; wall between floors = can't see
@@ -346,12 +397,25 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         ldx zzidx
         lda en_cooldown,x
         bne ?already_alert      ; already alerted = no sight sound
-        ; First alert! Play sight sound by enemy type
+        ; First alert! Attack immediately + play sight sound
         jsr play_enemy_sight
+        ldx zzidx
+        lda #15
+        sta en_atk,x           ; first attack after ~0.3s delay
 ?already_alert
         ldx zzidx
         lda #1
         sta en_cooldown,x
+        ; Face player before attacking
+        lda enxhi,x
+        cmp zpx_hi
+        bne ?fa_hi
+        lda en_x,x
+        cmp zpx
+?fa_hi  lda #0              ; assume right
+        bcc ?fa_set
+        lda #1              ; left
+?fa_set sta en_dir,x
         jsr enemy_do_attack
 ?no_attack
         ldx zzidx
@@ -391,7 +455,12 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         clc
         adc #1
 ?yd     cmp #32
-        bcs ?patrol         ; different level (>=32px Y) = patrol
+        bcs ?diff_level
+        jmp ?same_level
+?diff_level
+        ; Different level, X < 16px — just stand, don't oscillate
+        jmp ?grav
+?same_level
         ; Same level, within 16px: update patrol bounds to current pos
         lda en_x,x
         sec
@@ -432,14 +501,10 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         inc en_x,x
         bne ?pr1
         inc enxhi,x
-?pr1    inc en_x,x
-        bne ?pat_nw1
-        inc enxhi,x
-?pat_nw1
-        lda en_type,x
+?pr1    lda en_type,x
         tay
         lda en_speed_tab,y
-        cmp #3
+        cmp #2
         bcc ?pr_nospd
         inc en_x,x
         bne ?pr_nospd
@@ -486,16 +551,10 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
 ?pl_ok  lda #0
         sta en_tcnt,x       ; moved → reset turn counter
         dec en_x,x
-        lda en_x,x
-        bne ?pl2
-        lda enxhi,x
-        beq ?jgrav2
-        dec enxhi,x
-?pl2    dec en_x,x
         lda en_type,x
         tay
         lda en_speed_tab,y
-        cmp #3
+        cmp #2
         bcc ?pl_nospd
         lda en_x,x
         bne ?pl3
@@ -520,15 +579,74 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         jmp ?grav
 ?grav_jmp2 jmp ?grav
 ?do_chase
-        ; Determine direction: compare 16-bit enxhi:en_x vs zpx_hi:zpx
+        ; Lost Soul: vertical chase (fly toward player Y)
         ldx zzidx
+        lda en_type,x
+        cmp #EN_LOSTSOUL
+        bne ?normal_chase
+        ; Fly toward player Y (with wall check)
+        lda en_y,x
+        cmp zpy
+        beq ?ls_xchase
+        bcs ?ls_fly_up
+        ; en_y < zpy: check solid below, then fly down
+        lda en_x,x
+        clc
+        adc #8
+        sta gt_px
+        lda enxhi,x
+        adc #0
+        sta gt_px_hi
+        lda en_y,x
+        clc
+        adc #1
+        sta gt_py
+        jsr check_solid
+        pha
+        ldx zzidx
+        pla
+        bne ?ls_xchase      ; blocked → don't move down
+        inc en_y,x
+        jmp ?ls_xchase
+?ls_fly_up
+        ; en_y > zpy: check solid above, then fly up
+        lda en_x,x
+        clc
+        adc #8
+        sta gt_px
+        lda enxhi,x
+        adc #0
+        sta gt_px_hi
+        lda en_y,x
+        sec
+        sbc #17
+        sta gt_py
+        jsr check_solid
+        pha
+        ldx zzidx
+        pla
+        bne ?ls_xchase      ; blocked → don't move up
+        dec en_y,x
+?ls_xchase
+?normal_chase
+        ; RUNOUT: if en_dodge > 0, keep current direction (don't recalculate)
+        lda en_dodge,x
+        beq ?chase_calc
+        dec en_dodge,x
+        lda en_dir,x
+        bne ?chase_l
+        jmp ?chase_r
+?chase_calc
+        ; Determine direction: compare 16-bit enxhi:en_x vs zpx_hi:zpx
         lda enxhi,x
         cmp zpx_hi
-        bcc ?chase_r        ; enxhi < zpx_hi → go right
-        bne ?chase_l        ; enxhi > zpx_hi → go left
+        bne ?cc_hi
         lda en_x,x
         cmp zpx
-        bcc ?chase_r        ; en_x < zpx → go right
+        bcs ?chase_l        ; en_x >= zpx → left
+        jmp ?chase_r
+?cc_hi  bcs ?chase_l        ; enxhi >= zpx_hi → left
+        jmp ?chase_r
         ; Enemy right of or equal to player: face left, move left
 ?chase_l
         lda #1
@@ -558,20 +676,23 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         lda enxhi,x
         beq ?cl_wall        ; at 0
         bne ?cl_borrow
-?cl_wall jmp ?grav
+?cl_wall
+        ; RUNOUT: turn right and walk 32 frames (only if not already in RUNOUT)
+        lda en_dodge,x
+        bne ?cl_stop            ; already in RUNOUT → just stop
+        lda #0
+        sta en_dir,x
+        lda #32
+        sta en_dodge,x
+        jmp ?grav
+?cl_stop jmp ?grav
 ?cl_borrow
         dec enxhi,x
 ?cl_ok  dec en_x,x
-        lda en_x,x
-        bne ?cl_ok2
-        lda enxhi,x
-        beq ?grav
-        dec enxhi,x
-?cl_ok2 dec en_x,x
         lda en_type,x
         tay
         lda en_speed_tab,y
-        cmp #3
+        cmp #2
         bcc ?cl_done
         lda en_x,x
         bne ?cl_ok3
@@ -603,28 +724,58 @@ en_atk   .ds MAX_ENEMIES        ; attack timer (0=ready to fire)
         inc en_x,x
         bne ?cr2
         inc enxhi,x
-?cr2    inc en_x,x
-        bne ?cr3
-        inc enxhi,x
-?cr3    lda en_type,x
+?cr2    lda en_type,x
         tay
         lda en_speed_tab,y
-        cmp #3
-        bcc ?cr_wall
+        cmp #2
+        bcc ?cr_done
         inc en_x,x
-        bne ?cr_wall
+        bne ?cr_done
         inc enxhi,x
-?cr_wall jmp ?grav
+?cr_done
+?cr_wall
+        ; RUNOUT: turn left and walk 32 frames (only if not already in RUNOUT)
+        lda en_dodge,x
+        bne ?cr_stop            ; already in RUNOUT → just stop
+        lda #1
+        sta en_dir,x
+        lda #32
+        sta en_dodge,x
+        jmp ?grav
+?cr_stop jmp ?grav
 
 ?idle   ldx zzidx
-        ; If alerted but lost LOS, patrol instead of standing
         lda en_cooldown,x
-        bne ?do_patrol
-        jmp ?grav               ; not alerted = truly idle
-?do_patrol
-        jmp ?patrol             ; alerted = keep moving
+        beq ?idle_stand         ; not alerted = truly idle
+        ; Check if inside patrol bounds — if not, update them
+        lda en_x,x
+        cmp en_xmin,x
+        bcc ?id_fix
+        cmp en_xmax,x
+        bcc ?id_ok
+?id_fix lda en_x,x
+        sec
+        sbc #40
+        bcs ?id_mn
+        lda #0
+?id_mn  sta en_xmin,x
+        lda en_x,x
+        clc
+        adc #40
+        bcc ?id_mx
+        lda #255
+?id_mx  sta en_xmax,x
+?id_ok  jmp ?patrol
+?idle_stand
+        jmp ?grav
         ; --- Enemy gravity + vertical movement ---
 ?grav
+        ; Lost Soul: flying enemy, skip gravity entirely
+        lda en_type,x
+        cmp #EN_LOSTSOUL
+        bne ?do_grav
+        jmp ?nx
+?do_grav
         ; Apply vertical velocity
         lda envely,x
         beq ?no_vy

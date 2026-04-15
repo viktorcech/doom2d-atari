@@ -286,7 +286,22 @@
         bne ?do_j
         lda zpcoy
         beq ?noj            ; no ground, no coyote
-?do_j   lda #0
+?do_j   ; Check ceiling above head before jumping
+        lda zpx
+        clc
+        adc #5
+        sta gt_px
+        lda zpx_hi
+        adc #0
+        sta gt_px_hi
+        lda zpy
+        sec
+        sbc #PL_H
+        sbc #2              ; 2px above head
+        sta gt_py
+        jsr check_solid
+        bne ?noj            ; ceiling directly above → block jump
+        lda #0
         sec
         sbc #JUMPF
         sta zpvy
