@@ -6,83 +6,148 @@
 ; ============================================
 ; INIT GAME
 ; ============================================
+; (init_player reads/writes none of zfr / level_complete / stat_*, so it may
+;  run before init_level_ents zeroes them)
 .proc init_game
         lda #0
         sta zfr
-        sta level_complete
-        ; 2026-04-08: init end-level stats
-        sta stat_kills
-        sta stat_time_lo
-        sta stat_time_hi
-        sta stat_frames
-        lda num_en
-        sta stat_total_en       ; remember total enemies for % calc
         jsr init_player
-        jsr init_enemies
-        jsr init_pickups
-        jsr init_decorations
-        jsr restart_close_doors
-        jsr init_doors
+        jsr init_level_ents
         jsr init_eproj
-        lda #$FF
-        sta ft_prev_col
-        sta ft_prev_row
+        lda #$FF                ; Z=0: main's new-game path branches on it
+        rts
+.endp
+; (init_level_ents is in main.asm, in front of init_decorations)
+
+; ============================================
+; GET_TILE_AT16 - tile at pixel (gt_px_hi:gt_px, gt_py_hi:gt_py).
+; Output: A = tile (out of map = 1, solid), ztptr -> tile with its map bank
+; selected (callers write doors/switches), gt_col/gt_row. X is PRESERVED.
+; ============================================
+.proc get_tile_at16
+        ldy gt_px               ; col = hi*32 | lo/8: lsr + 3x ror = hi*32 for
+        lda gt_px_hi            ; hi 0..3; hi 4..7 and -5..-1 give >= MAP_W
+        lsr                     ; (out of the map)
+        ror
+        ror
+        ror
+        ora div8_lut,y
+        cmp #MAP_W
+        bcs ?oob
+        sta gt_col
+        ldy gt_py               ; row = hi*32 | lo/8 (the same)
+        lda gt_py_hi
+        lsr
+        ror
+        ror
+        ror
+        ora div8_lut,y
+        cmp #MAP_H
+        bcs ?oob
+        sta gt_row          ; keep gt_row valid for callers (switch code)
+        tay
+        lda map_row_bank,y
+        sta VBXE_BANK_SEL
+        lda map_row_lo,y        ; C=0 (bcs ?oob not taken)
+        adc gt_col
+        sta ztptr
+        lda map_row_hi,y
+        adc #0
+        sta ztptr+1
+        ldy #0
+        lda (ztptr),y
+        rts
+?oob    lda #1
+        rts
+.endp
+
+; CHECK_SOLID16 / CHECK_SOLID_OR_PLATFORM16 - 16-bit-Y versions (player).
+; X register preserved (uses Y for the table lookup).
+.proc check_solid16
+        jsr get_tile_at16
+        bmi ?pass
+        tay
+        lda tile_solid,y
+        rts
+?pass   lda #0
+        rts
+.endp
+
+.proc check_solid_or_platform16
+        jsr get_tile_at16
+        bmi ?pass
+        tay
+        lda tile_oneway,y
+        bne ?plat               ; tile_oneway is 0/1: A = 1 already
+        lda tile_solid,y
+?plat   rts
+?pass   lda #0
         rts
 .endp
 
 ; ============================================
-; GET TILE AT PIXEL POSITION
-; Input: gt_px, gt_py (pixel coords)
-; Output: A = tile index from map
+; ABS16 - absolute value of a 16-bit difference, clamped to one byte.
+; In:  abs16.ab_lo = low byte of (a-b), A = high byte of (a-b), N/Z = A
+;      (every caller ends on the sbc that made A: no cmp #0 needed)
+; Out: C=1 -> A = |a-b| (0..255)
+;      C=0 -> |a-b| >= 256, out of any blast/hit radius
+; Clobbers A only - X and Y are preserved, so it drops into loops indexed
+; either way. (Replaces every hand-rolled copy of this pattern in the tree.)
 ; ============================================
-.proc get_tile_at
-        ; tile_col = (gt_px_hi:gt_px) / 16  (LUT replaces 4x LSR)
-        lda gt_px_hi
-        asl
-        asl
-        asl
-        asl                 ; hi * 16 (0 or 16)
-        sta gt_col
-        ldx gt_px
-        lda div16_lut,x     ; lo / 16 via LUT
-        clc
-        adc gt_col
-        sta gt_col
-        ; tile_row = gt_py / 16
-        ldx gt_py
-        lda div16_lut,x     ; py / 16 via LUT
-        sta gt_row
-        ; bounds check
-        lda gt_col
-        cmp #MAP_W
-        bcs ?oob
-        sta r_col
-        lda gt_row
-        cmp #MAP_H
-        bcs ?oob
-        sta r_row
-        jsr calc_map_ptr
-        ldy #0
-        lda (ztptr),y
+.proc abs16
+        beq ?pos                ; hi = 0 -> difference is already 0..255
+        cmp #$FF
+        bne ?far                ; hi != $FF -> further than 255 px
+        lda ab_lo               ; C=1 from the equal cmp #$FF
+        beq ?far                ; hi=$FF, lo=0 -> exactly -256
+        eor #$FF
+        adc #0                  ; C=1: A = ~ab_lo + 1 = 0 - ab_lo
+        sec
         rts
-?oob    lda #1             ; out of bounds = solid (wall)
+?pos    lda ab_lo
+        sec
+        rts
+?far    clc
+        rts
+ab_lo   dta 0
+.endp
+
+; ============================================
+; WORLD_TO_TILE - 16-bit world point -> wt_col / wt_row.
+; Callers only use it for entities that are already inside the map.
+; Clobbers A, Y. Preserves X.
+; ============================================
+.proc world_to_tile
+        lda wt_xhi
+        asl
+        asl
+        asl
+        asl
+        asl                     ; hi * 32 (low 5 bits 0 -> ORA = ADD)
+        ldy wt_x
+        ora div8_lut,y
+        sta wt_col
+        lda wt_yhi
+        asl
+        asl
+        asl
+        asl
+        asl
+        ldy wt_y
+        ora div8_lut,y
+        sta wt_row
         rts
 .endp
-gt_px   dta 0
-gt_px_hi dta 0
-gt_py   dta 0
-gt_col  dta 0
-gt_row  dta 0
 
 ; ============================================
 ; CALC MAP POINTER
 ; Input: r_row, r_col (tile coords)
-; Output: ztptr = address in map_data
+; Output: ztptr = address of the tile in the MEMAC window, its bank selected
 ; ============================================
 .proc calc_map_ptr
-        lda #BANK_EN+BANK_MAP
-        sta VBXE_BANK_SEL
         ldy r_row
+        lda map_row_bank,y
+        sta VBXE_BANK_SEL
         lda map_row_lo,y
         clc
         adc r_col
@@ -94,199 +159,68 @@ gt_row  dta 0
 .endp
 
 ; ============================================
-; TILE COL HELPERS (shared by LOS, can_hear, pickups, doors)
+; PLAYER CELL HELPERS (pickups). Preserve X (Y is the LUT index).
 ; ============================================
-
-; Shared temp for tile col helpers
-gt_tmp  dta 0
-
-; Enemy tile col from en_x[X], enxhi[X] → A
-; (does NOT add +8 center offset — caller does if needed)
-.proc get_enemy_tile_col
-        ldy en_x,x
-        lda div16_lut,y      ; en_x / 16 via LUT
-        sta gt_tmp
-        lda enxhi,x
-        asl
-        asl
-        asl
-        asl
-        ora gt_tmp
-        rts
-.endp
 
 ; Player tile col from zpx, zpx_hi → A
 .proc get_player_tile_col
-        ldx zpx
-        lda div16_lut,x      ; zpx / 16 via LUT
-        sta gt_tmp
+        ldy zpx
         lda zpx_hi
         asl
         asl
         asl
         asl
-        ora gt_tmp
+        asl
+        ora div8_lut,y       ; hi*32 | zpx/8
         rts
 .endp
 
-; Player center tile col from (zpx+8), zpx_hi → A
-.proc get_player_center_col
-        lda zpx
-        clc
-        adc #8
-        pha             ; save low byte (preserve carry for zpx_hi)
-        lda zpx_hi
-        adc #0          ; add carry from zpx+8
+; Player row of (zpy_hi:zpy) - A (A = pixels above the feet) → A (16-bit Y)
+.proc get_player_row
+        eor #$FF                ; zpy + ~A + 1 = zpy - A: the same add the
+        sec                     ; sbc does (result and C identical)
+        adc zpy
+        tay
+        lda zpy_hi
+        sbc #0
         asl
         asl
         asl
         asl
-        sta gt_tmp
-        pla             ; restore low byte
-        tax
-        lda div16_lut,x  ; (zpx+8) / 16 via LUT
-        ora gt_tmp
+        asl
+        ora div8_lut,y          ; hi*32 | lo/8
         rts
 .endp
 
-; Map row address LUT: map_data + row * 32 for rows 0-31
+; Map row LUTs (free RAM below the main segment, each table inside one page):
+; row R lives in VRAM bank BANK_MAP + R/MAP_RPB at MEMW + (R mod MAP_RPB)*
+; MAP_STRIDE: a row never straddles a bank or a page; map_row_bank holds the
+; BANK_SEL value.
+map_lut_save = *
+        org $1B00
 map_row_lo
-        :32 dta <[map_data + #*32]
+        :MAP_H dta <[MEMW + [# - [#/MAP_RPB]*MAP_RPB]*MAP_STRIDE]
 map_row_hi
-        :32 dta >[map_data + #*32]
+        :MAP_H dta >[MEMW + [# - [#/MAP_RPB]*MAP_RPB]*MAP_STRIDE]
+        ert >*<>$1B
+        org $1C00
+map_row_bank
+        :MAP_H dta BANK_EN+BANK_MAP+[#/MAP_RPB]
+; the rest of the page: trigger actions (triggers_shot.asm)
+        icl 'triggers_shot.asm'
+        ert *>$1D00
+        org map_lut_save
 
 
-; Dirty row base offset LUT: row_x20[i] = i * 20
-row_x20
-        :13 dta [#*20]
-
 ; ============================================
-; TILE SOLID TABLE
-; 0=passable, 1=solid
-; Index: 0=empty 1=wall 2=platform 3=ceil 4=door 5=sky 6=darkbg(wall) 7=tech 8=metal 9=support 10=stone
+; TILE BEHAVIOUR TABLES - per level, 256 entries each, loaded with the level
+; (diskio.asm load_map_tiles from tools/d2df2map.py): tile_solid 1 = wall,
+; tile_oneway 1 = platform (solid only from above). Ids 128-255 are
+; background (passable: callers test bit 7 first). Page-aligned free RAM
+; below the code.
 ; ============================================
-tile_solid
-        dta 0,1,0,1,1,0,1,1,1,1,1
-;               ^ floor=0 (one-way)  ^ sky=0  ^ darkbg=1 (wall)
-        dta 0,0,0,0         ; 11-14 = floor variants (one-way)
-        dta 1                ; 15 = invisible solid (barrel)
-        ; New tiles 16-24 (VRAM $032000+):
-        dta 1                ; 16 = CEIL3_5 (wall)
-        dta 1                ; 17 = CEIL5_1 (wall)
-        dta 1                ; 18 = DEM1_1 (wall)
-        dta 1                ; 19 = FLAT1 (wall)
-        dta 1                ; 20 = FLAT22 (wall)
-        dta 0                ; 21 = FLOOR0_6 (one-way)
-        dta 1                ; 22 = FLOOR1_1 (wall)
-        dta 0                ; 23 = FLOOR5_1 (one-way)
-        dta 1                ; 24 = MFLR8_1 (wall)
-        dta 1                ; 25 = door red (solid)
-        dta 1                ; 26 = door blue (solid)
-        dta 1                ; 27 = door yellow (solid)
-        dta 0                ; 28 = switch OFF (passable, on wall)
-        dta 0                ; 29 = switch ON (passable, on wall)
-        dta 0                ; 30 = exit switch OFF (passable)
-        dta 0                ; 31 = exit switch ON (passable)
-        ; New tiles 32-42 (VRAM $060400+):
-        dta 1                ; 32 = BOX01 (wall)
-        dta 1                ; 33 = BOX02 (wall)
-        dta 1                ; 34 = COMP02 (wall)
-        dta 1                ; 35 = COMP04 (wall)
-        dta 1                ; 36 = COMP05 (wall)
-        dta 1                ; 37 = WALL009 (wall)
-        dta 1                ; 38 = WALL020 (wall)
-        dta 1                ; 39 = WALL024 (wall)
-        dta 1                ; 40 = WALL026 (wall)
-        dta 1                ; 41 = WALL027 (wall)
-        dta 1                ; 42 = WALL028 (wall)
-        dta 1                ; 43 = solid floor (half-height, solid)
-
-; ============================================
-; ONE-WAY PLATFORM TABLE
-; Tiles that are solid only when falling onto them from above
-; ============================================
-tile_oneway
-        dta 0,0,1,0,0,0,0,0,0,0,0
-;             ^ floor=one-way
-        dta 1,1,1,1          ; 11-14 = floor variants (one-way)
-        dta 0                ; 15 = invisible solid (not one-way)
-        ; New tiles 16-24:
-        dta 0                ; 16 = CEIL3_5 (wall, not one-way)
-        dta 0                ; 17 = CEIL5_1 (wall, not one-way)
-        dta 0                ; 18 = DEM1_1 (wall, not one-way)
-        dta 0                ; 19 = FLAT1 (wall, not one-way)
-        dta 0                ; 20 = FLAT22 (wall, not one-way)
-        dta 1                ; 21 = FLOOR0_6 (one-way platform)
-        dta 0                ; 22 = FLOOR1_1 (wall, not one-way)
-        dta 1                ; 23 = FLOOR5_1 (one-way platform)
-        dta 0                ; 24 = MFLR8_1 (wall, not one-way)
-        dta 0                ; 25 = door red (not one-way)
-        dta 0                ; 26 = door blue (not one-way)
-        dta 0                ; 27 = door yellow (not one-way)
-        dta 0                ; 28 = switch OFF (not one-way)
-        dta 0                ; 29 = switch ON (not one-way)
-        dta 0                ; 30 = exit switch OFF (not one-way)
-        dta 0                ; 31 = exit switch ON (not one-way)
-        ; New tiles 32-42:
-        dta 0                ; 32 = BOX01 (not one-way)
-        dta 0                ; 33 = BOX02 (not one-way)
-        dta 0                ; 34 = COMP02 (not one-way)
-        dta 0                ; 35 = COMP04 (not one-way)
-        dta 0                ; 36 = COMP05 (not one-way)
-        dta 0                ; 37 = WALL009 (not one-way)
-        dta 0                ; 38 = WALL020 (not one-way)
-        dta 0                ; 39 = WALL024 (not one-way)
-        dta 0                ; 40 = WALL026 (not one-way)
-        dta 0                ; 41 = WALL027 (not one-way)
-        dta 0                ; 42 = WALL028 (not one-way)
-        dta 0                ; 43 = solid floor (not one-way)
-
-; ============================================
-; HALF-HEIGHT TILE TABLE
-; 1 = half-height (only top 8px have texture, bottom 8px transparent)
-; ============================================
-tile_halfh
-        dta 0,0,0,0,0,0,0,0,0,0,0  ; 0-10
-        dta 1,1,1,1                  ; 11-14 = half-height floor variants
-        dta 0                        ; 15
-        dta 0,0,0,0,0,0,0,0,0       ; 16-24
-        dta 0,0,0                    ; 25-27 = doors
-        dta 0,0                      ; 28-29 = switch OFF/ON
-        dta 0,0                      ; 30-31 = exit switch OFF/ON
-        dta 0,0,0,0,0,0,0,0,0,0,0   ; 32-42 = wall tiles
-        dta 1                        ; 43 = solid floor (half-height)
-
-; ============================================
-; CHECK IF TILE AT (gt_px, gt_py) IS SOLID
-; Output: Z=0 if solid, Z=1 if passable
-; ============================================
-.proc check_solid
-        jsr get_tile_at
-        bmi ?pass           ; bit 7 = BG variant, always passable
-        tax
-        lda tile_solid,x
-        rts                 ; A!=0 means solid
-?pass   lda #0
-        rts
-.endp
-
-; ============================================
-; CHECK IF TILE AT (gt_px, gt_py) IS SOLID OR PLATFORM
-; For use during falling - platforms count as solid
-; Output: Z=0 if solid/platform, Z=1 if passable
-; ============================================
-.proc check_solid_or_platform
-        jsr get_tile_at
-        bmi ?pass           ; bit 7 = BG variant, always passable
-        tax
-        lda tile_oneway,x
-        bne ?plat           ; one-way tile = solid when falling
-        lda tile_solid,x
-        rts
-?plat   lda #1              ; one-way = solid when falling
-        rts
-?pass   lda #0
-        rts
-.endp
+tile_solid      = $0B00
+tile_oneway     = $1D00         ; [128]: ids 0..127 (a background id is never read)
+                                ; $1D80-$1DFF: bl_s7 (blood.asm)
 
 ; sound_update is in sound.asm

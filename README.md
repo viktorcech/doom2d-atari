@@ -27,36 +27,27 @@ A 2D side-scrolling action game inspired by Doom, written entirely in 6502 assem
 
 ## Build
 
-```bash
-bash build_doom2d.sh
+```
+python build_doom2d.py
 ```
 
-Output: `bin/doom2d.xex` (~272 KB)
+Put `mads.exe` in the project root. With no arguments it builds every level in
+`maps/` (`d2d_map01`-`d2d_map23`); you can also pass your own `.map` files.
+
+Output: `bin/doom2d.atr`, a bootable disk image (boot loader, the game for VBXE
+at `$D600` or `$D700`, the levels and 3 save slots). Mount it as D1: and boot.
 
 ## Project Structure
 
 ```
-source/         6502 assembly source files (MADS)
-  main.asm        Entry point, includes all modules
-  constants.asm   VBXE/POKEY/OS registers, game constants
-  zeropage.asm    Zero-page variables ($80-$D5)
-  vbxe.asm        XDL setup, blitter, screen clear, MEMAC
-  game.asm        Level init, tile collision, map access via MEMAC-A
-  player.asm      Input, movement, jump physics, camera follow
-  weapons.asm     7 weapon types, hitscan + projectile systems
-  enemies.asm     6 enemy types, AI with LOS/chase/attack
-  renderer.asm    Tile and sprite rendering, double-buffer swap
-  dirty.asm       Dirty tile tracking for optimized rendering
-  hud.asm         HP, ammo, weapon, keys, armor display
-  pickups.asm     21 item types
-  door.asm        8 door slots, key doors, auto-close timer
-  sound.asm       4-bit sample playback via POKEY IRQ
-  menu.asm        Title screen and pause menu
-data/           Binary assets (sprites, tiles, sounds, sky, palette)
-converted/      Converted sprite assets
-maps/           Level maps (text format, 64x32 tiles)
-tools/          Python asset pipeline scripts
-mapedit/        Map editor (Python/Tkinter)
+build_doom2d.py   Build: maps -> levels, boot loader + game (MADS), ATR
+source/           6502 assembly source files (MADS), main.asm includes the modules
+  gen/            Generated tables (sprite frames, animations, sound tables)
+data/             Binary assets (sprites, sky, title, sounds, palette, HUD font)
+maps/             Levels: .map (text) + .tiles (tileset, foreground, triggers)
+tools/            Python tools: map2bin (used by the build), d2df2map
+                  (Doom 2D Forever map converter), asset preparation
+mapedit/          Map editor (Python/Tkinter)
 ```
 
 ## Memory Layout

@@ -12,91 +12,72 @@
         ; Y = projectile index (kept in Y throughout hot path)
         ; X = enemy index (kept in X throughout hot path)
         ldy zt                  ; Y = proj index
-        ldx #0                  ; X = enemy index
+        ldx #0                  ; X = enemy index (slot 0 before the bound)
 ?lp     lda en_act,x
         cmp #1                  ; only alive enemies
-        beq ?chk
-        jmp ?nxe
-?chk    ; --- X distance (16-bit) ---
+        bne ?nxe
+        ; --- X distance (16-bit) ---
         ; Y=proj, X=enemy — no register swapping needed
+        ; |dx| < 14 <=> hi=0 and lo<14, or hi=$FF and lo>=243 (-13..-1; lo=0
+        ; is -256 = far). zcp_tmph is never read, so it is not written.
         lda proj_x,y
         sec
         sbc en_x,x
         sta zcp_tmp             ; dist low
         lda proj_xh,y
-        sbc enxhi,x
-        sta zcp_tmph            ; dist high (signed)
-        ; Absolute value
-        bpl ?xpos
+        sbc enxhi,x             ; dist high (signed)
+        bmi ?xneg
+        bne ?nxe                ; hi != 0 -> too far
         lda zcp_tmp
-        eor #$FF
-        clc
-        adc #1
-        sta zcp_tmp
-        lda zcp_tmph
-        eor #$FF
-        adc #0
-        sta zcp_tmph
-?xpos   lda zcp_tmph
-        beq ?xnear
-        jmp ?nxe                ; hi != 0 -> too far
-?xnear  lda zcp_tmp
         cmp #14                 ; within 14px X
-        bcc ?ychk
-        jmp ?nxe
-?ychk   ; --- Y distance ---
+        bcs ?nxe
+        bcc ?ychk               ; (always)
+?xneg   cmp #$FF
+        bne ?nxe                ; <= -257 -> too far
+        lda zcp_tmp
+        cmp #243                ; within -13..-1
+        bcc ?nxe
+?ychk   ; --- Y distance (16-bit: player proj proj_y_hi vs enemy en_y_hi) ---
         lda proj_y,y
         sec
         sbc en_y,x
-        bpl ?ypos
-        eor #$FF
-        clc
-        adc #1
-?ypos   cmp #28                 ; within 28px Y
+        sta abs16.ab_lo
+        lda proj_y_hi,y
+        sbc en_y_hi,x
+        jsr abs16               ; preserves X (enemy) and Y (projectile)
+        bcc ?nxe
+        cmp #28                 ; within 28px Y
         bcc ?hit
-        jmp ?nxe
+?nxe    inx
+        cpx num_en              ; only slots 0..num_en-1 can ever be active
+        bcc ?lp
+        clc                     ; no hit
+        rts
 ?hit    ; --- HIT! ---
-        ; Save X/Y for subroutine calls (hit path is rare)
-        stx zcp_eidx
+        ; Save Y for subroutine calls (hit path is rare; X = enemy survives
+        ; every call below that needs it, so it is not parked)
         sty zcp_proj
         ; Apply damage
-        lda proj_dmg,y
-        sta zcp_tmp             ; damage amount
         lda en_hp,x
         sec
-        sbc zcp_tmp
+        sbc proj_dmg,y
         bcc ?kill
         beq ?kill
         sta en_hp,x
-        ; Pain sprite
-        lda #6
-        sta en_pain_tmr,x
-        ; Alert enemy and face player on hit
-        lda #1
-        sta en_cooldown,x
-        lda enxhi,x
-        cmp zpx_hi
-        bcc ?face_r
-        bne ?face_l
-        lda en_x,x
-        cmp zpx
-        bcc ?face_r
-?face_l lda #1
-        sta en_dir,x
-        jmp ?kb
-?face_r lda #0
-        sta en_dir,x
+        lda proj_vx,y           ; the blood the shot's way
+        jsr bl_way
+        lda proj_dmg,y          ; pain / wake-up as TMonster.Damage
+        jsr en_hurt             ; (preserves X, Y)
 ?kb     ; Knockback from hit (use proj_vx direction)
         lda proj_vx,y
         bmi ?kb_l
-        ; Knockback right
-        lda envelx,x
+        lda envelx,x            ; knockback right
         clc
         adc #2
         cmp #4
         bcc ?kb_s
         lda #4
-        jmp ?kb_s
+        bne ?kb_s               ; (always: A = 4)
 ?kb_l   ; Knockback left
         lda envelx,x
         sec
@@ -108,51 +89,40 @@
         ; Play pain sound per enemy type (clobbers X/Y)
         ldy en_type,x
         lda en_pain_sfx,y
-        jsr play_sfx_unlock
-        ; Destroy projectile
+        jsr play_sfx
+        ; Destroy projectile (shared tail; Y = proj index 0..MAX_PROJ-1: N=0)
         ldy zcp_proj
-        lda #0
-        sta proj_a,y
-        sec                     ; hit
-        rts
+        bpl ?nosplash           ; (always)
 ?kill   ; Enemy killed! (X=enemy, Y=proj still valid here)
-        jsr start_enemy_death   ; X=enemy index (clobbers regs)
+        jsr start_enemy_death   ; preserves X (= enemy), clobbers Y
         ; Knockback velocity for gib (rocket + weak enemy only)
         ldy zcp_proj
         lda proj_spr,y
         cmp #SPR_ROCKET_PROJ
         bne ?no_gib
         ; Only zombie, imp, shotgun guy can gib
-        ldx zcp_eidx
         lda en_type,x
         cmp #EN_ZOMBIE
         beq ?do_gib
         cmp #EN_IMP
         beq ?do_gib
         cmp #EN_SHOTGUN
-        beq ?do_gib
-        jmp ?no_gib
-?do_gib ldx zcp_eidx
-        lda #1
+        bne ?no_gib
+?do_gib lda #1
         sta en_gib,x
         lda proj_vx,y           ; Y still = proj
         bmi ?gib_l
-        ldx zcp_eidx
         lda #8
+        dta $2C                 ; bit $F8A9 (ROM/RAM, no I/O): skips lda #$F8
+?gib_l  lda #$F8
         sta envelx,x
-        jmp ?gib_vy
-?gib_l  ldx zcp_eidx
-        lda #$F8
-        sta envelx,x
-?gib_vy lda #$F4
+        lda #$F4
         sta envely,x
         ; Gib sound (clobbers regs)
         lda #SFX_SLOP
-        jsr play_sfx_unlock
+        jsr play_sfx
         jmp ?kill_done
-?no_gib ldx zcp_eidx
-        lda #0
-        sta envely,x
+?no_gib ; (start_enemy_death set it falling)
         ; Death sound (clobbers regs)
         jsr play_enemy_death
 ?kill_done
@@ -168,20 +138,8 @@
         sta proj_a,y
         sec                     ; hit
         rts
-?nxe    inx
-        cpx #MAX_ENEMIES
-        bcs ?miss
-        jmp ?lp
-?miss   clc                     ; no hit
-        rts
-; zcp_proj, zcp_eidx used only in hit path (rare)
-; zcp_tmp, zcp_tmph used in distance calc
+; zcp_proj used only in hit path (rare); zcp_tmp in the distance calc
 .endp
-
-; Turn counter for stuck detection
-en_tcnt      :MAX_ENEMIES dta 0  ; turn counter for stuck detection
-en_dodge     :MAX_ENEMIES dta 0  ; dodge timer (walk opposite dir when stuck)
-en_pain_tmr  :MAX_ENEMIES dta 0 ; pain sprite timer
 
 ; ============================================
 ; ENEMY PROJECTILES (imp fireball etc.)
@@ -191,10 +149,12 @@ MAX_EPROJ = 3
 eproj_a   .ds MAX_EPROJ       ; 0=inactive, 1=active
 eproj_x   .ds MAX_EPROJ       ; X lo
 eproj_xh  .ds MAX_EPROJ       ; X hi
-eproj_y   .ds MAX_EPROJ       ; Y
+eproj_y   .ds MAX_EPROJ       ; Y lo
+eproj_y_hi .ds MAX_EPROJ      ; Y hi (16-bit for tall maps)
 eproj_vx  .ds MAX_EPROJ       ; velocity X (signed)
 eproj_dmg .ds MAX_EPROJ       ; damage
 eproj_spr .ds MAX_EPROJ       ; sprite index
+eproj_own .ds MAX_EPROJ       ; the monster that fired it
 
 .proc init_eproj
         ldx #MAX_EPROJ-1
@@ -205,146 +165,42 @@ eproj_spr .ds MAX_EPROJ       ; sprite index
         rts
 .endp
 
-; Spawn enemy projectile
-; Input: X = enemy index (en_x/enxhi/en_y/en_dir used for position)
-.proc spawn_eproj
-        stx ep_eidx
-        ; Find free slot
-        ldx #0
-?f      lda eproj_a,x
-        beq ?ok
-        inx
-        cpx #MAX_EPROJ
-        bne ?f
-        rts                    ; no free slot
-?ok     lda #1
-        sta eproj_a,x
-        ; Position from enemy + offset in fire direction
-        ldy ep_eidx
-        lda en_dir,y
-        bne ?sp_left
-        ; Facing right: X + 12
-        lda en_x,y
-        clc
-        adc #12
-        sta eproj_x,x
-        lda enxhi,y
-        adc #0
-        sta eproj_xh,x
-        jmp ?sp_y
-?sp_left
-        ; Facing left: X - 4
-        lda en_x,y
-        sec
-        sbc #4
-        sta eproj_x,x
-        lda enxhi,y
-        sbc #0
-        sta eproj_xh,x
-?sp_y   lda en_y,y
-        sec
-        sbc #14                ; chest height
-        sta eproj_y,x
-        ; Velocity: toward player direction
-        lda en_dir,y
-        bne ?left
-        lda #3                 ; right
-        sta eproj_vx,x
-        jmp ?setdmg
-?left   lda #$FD               ; left (-3)
-        sta eproj_vx,x
-?setdmg ; Set damage and sprite based on enemy type
-        ldy ep_eidx
-        lda en_type,y
-        cmp #EN_CACO
-        beq ?caco_fb
-        cmp #EN_BARON
-        beq ?baron_fb
-        ; Imp fireball: 20 damage, red sprite
-        lda #20
-        sta eproj_dmg,x
-        lda #SPR_IMP_FIRE1
-        sta eproj_spr,x
-        rts
-?caco_fb ; Caco fireball: 15 damage, different sprite
-        lda #15
-        sta eproj_dmg,x
-        lda #SPR_CACO_FIRE1
-        sta eproj_spr,x
-        rts
-?baron_fb ; Baron fireball: 40 damage, green sprite
-        lda #40
-        sta eproj_dmg,x
-        lda #SPR_BARON_FIRE1
-        sta eproj_spr,x
-        rts
-ep_eidx dta 0
-.endp
+; (spawn_eproj: enemies_ai.asm, in the low RAM)
 
 ; Update enemy projectiles
 .proc eproj_update
         ldx #0
+        clc                     ; C = 0 at ?lp on every entry (here, and the
+        beq ?lp                 ; taken bcc below); slot 0 first, order 0..2
+?kill   lda #0                  ; (the loop's end up here: in reach of ?lp)
+        sta eproj_a,x
+?nx     inx
+        cpx #MAX_EPROJ
+        bcc ?lp
+        rts
 ?lp     lda eproj_a,x
-        bne ?upd
-        jmp ?nx
-?upd    ; Animate sprite (toggle frame every 4 frames)
-        lda eproj_spr,x
-        cmp #SPR_BARON_FIRE1
-        bcs ?baron_anim
-        cmp #SPR_CACO_FIRE1
-        bcs ?caco_anim
-        ; Imp fireball animation
-        lda zfr
-        and #$04
-        beq ?f1
-        lda #SPR_IMP_FIRE2
-        sta eproj_spr,x
-        jmp ?move
-?f1     lda #SPR_IMP_FIRE1
-        sta eproj_spr,x
-        jmp ?move
-?caco_anim
-        lda zfr
-        and #$04
-        beq ?cf1
-        lda #SPR_CACO_FIRE2
-        sta eproj_spr,x
-        jmp ?move
-?cf1    lda #SPR_CACO_FIRE1
-        sta eproj_spr,x
-        jmp ?move
-?baron_anim
-        lda zfr
-        and #$04
-        beq ?bf1
-        lda #SPR_BARON_FIRE2
-        sta eproj_spr,x
-        jmp ?move
-?bf1    lda #SPR_BARON_FIRE1
-        sta eproj_spr,x
-?move   ; Update 16-bit X
+        beq ?nx
+        ; (animation moved to render_eproj: FIRE2 = FIRE1+1 and all FIRE1
+        ; bases are even, so the frame is pure math - no per-type chains)
+        ; Update 16-bit X (C = 0, see the head)
         lda eproj_x,x
-        clc
         adc eproj_vx,x
         sta eproj_x,x
         lda eproj_vx,x
         bmi ?negv
         lda eproj_xh,x
-        adc #0
-        sta eproj_xh,x
-        jmp ?bounds
+        adc #0                  ; xh <= 3 (the bounds test below) + C <= 1:
+        bcc ?bounds             ; no carry out, always (N kept)
 ?negv   lda eproj_xh,x
         adc #$FF
-        sta eproj_xh,x
-?bounds ; Kill if off screen
-        lda eproj_xh,x
+?bounds sta eproj_xh,x          ; stores keep N/Z of the new hi byte
+        ; Kill if off the map (the rest of the right edge: the tile test,
+        ; off the map reads as solid)
         bmi ?kill
-        cmp #2
+        cmp #[MAP_W*TW+255]/256
         bcs ?kill
-        ; Check wall collision
-        stx ep_idx
+        ; Check wall collision (C=0: bcs not taken)
         lda eproj_x,x
-        clc
         adc #4
         sta gt_px
         lda eproj_xh,x
@@ -352,82 +208,92 @@ ep_eidx dta 0
         sta gt_px_hi
         lda eproj_y,x
         sta gt_py
-        jsr check_solid
-        bne ?kill2
+        lda eproj_y_hi,x
+        sta gt_py_hi
+        jsr check_solid16      ; preserves X
+        bne ?kill
+        jsr ep_mon             ; the monsters first (g_Weapon_Hit), X kept
+        bcs ?kill
+        beq ?nx                ; a dead player: the shot flies on
         ; Check player collision (8x8 vs player 10x28)
-        ldx ep_idx
-        ; X distance
+        ; X distance: true 16-bit abs (hits from BOTH sides symmetrically)
         lda eproj_x,x
         sec
         sbc zpx
-        sta ep_dx
+        sta abs16.ab_lo
         lda eproj_xh,x
         sbc zpx_hi
-        bne ?nx2               ; hi byte diff = too far
-        lda ep_dx
-        bpl ?xpos
-        eor #$FF
-        clc
-        adc #1
-?xpos   cmp #12                ; within 12px X
-        bcs ?nx2
-        ; Y distance
+        jsr abs16
+        bcc ?nx
+        cmp #12                ; within 12px X
+        bcs ?nx
+        ; Y distance (16-bit |eproj_y - zpy| < 24)
         lda eproj_y,x
         sec
         sbc zpy
-        bpl ?ypos
-        eor #$FF
-        clc
-        adc #1
-?ypos   cmp #24                ; within 24px Y
-        bcs ?nx2
-        ; Hit player!
+        sta abs16.ab_lo
+        lda eproj_y_hi,x
+        sbc zpy_hi
+        jsr abs16
+        bcc ?nx
+        cmp #24                ; within 24px Y
+        bcs ?nx
+        ; Hit player! (then the same slot clear)
+        lda eproj_vx,x          ; the blood the ball's way
+        jsr bl_way
         lda eproj_dmg,x
-        jsr player_take_damage
-        lda #0
-        sta eproj_a,x
-        jmp ?nx
-?kill2  ldx ep_idx
-?kill   lda #0
-        sta eproj_a,x
-?nx     inx
-        cpx #MAX_EPROJ
-        beq ?done
-        jmp ?lp
-?nx2    ldx ep_idx
-        jmp ?nx
-?done   rts
-ep_idx  dta 0
-ep_dx   dta 0
+        jsr player_take_damage ; preserves X
+        jmp ?kill
 .endp
 
 ; Render enemy projectiles
 .proc render_eproj
+        ; Animate: sprite = FIRE1_base | (zfr>>2 & 1): FIRE2 = FIRE1+1 and
+        ; FIRE1 is even (prepare_sprites.py); a baron ball flying left: +2.
+        ; The frame bit is the same for every ball: once, into ora's operand
+        lda zfr
+        lsr
+        lsr
+        and #1
+        sta ?fr+1
         ldx #0
 ?lp     lda eproj_a,x
         beq ?nx
-        stx ep_ridx
-        ; Set draw position
-        lda eproj_x,x
-        sta zdx
-        lda eproj_xh,x
-        sta zdxh
-        lda eproj_y,x
-        sta zdy
-        ; Mark dirty
-        lda #8
-        sta md_w
-        sta md_h
-        jsr mark_dirty_sprite
-        ; Blit sprite
-        ldx ep_ridx
+        stx ?rx+1               ; blit_sprite clobbers X and Y (SMC: ldx #)
         lda eproj_spr,x
+        cmp #SPR_BARON_FIRE1
+        bne ?fr
+        ldy eproj_vx,x
+        bpl ?fr
+        lda #SPR_BARON_FIRE1_L
+?fr     ora #0
+        tay                     ; Y = sprite
+        lda spr_ox,y            ; zdxh:zdx = eproj_x + signed offset (centred)
+        clc
+        adc eproj_x,x
+        sta zdx
+        lda spr_ox,y            ; its sign: read from the table again, no copy
+        and #$80                ; (lda / and keep C)
+        beq ?xp
+        lda #$FF
+?xp     adc eproj_xh,x
+        sta zdxh
+        lda spr_oy,y
+        clc
+        adc eproj_y,x
+        sta zdy
+        lda spr_oy,y
+        and #$80
+        beq ?yp
+        lda #$FF
+?yp     adc eproj_y_hi,x
+        sta zdy_hi
+        tya
         jsr blit_sprite
-        ldx ep_ridx
+?rx     ldx #0                  ; = slot index (patched above)
 ?nx     inx
         cpx #MAX_EPROJ
-        beq ?done
-        jmp ?lp
-?done   rts
-ep_ridx dta 0
+        bne ?lp
+        rts
 .endp
+        ert SPR_IMP_FIRE1&1 .or SPR_CACO_FIRE1&1 .or SPR_BARON_FIRE1&1 .or SPR_BARON_FIRE1_L&1

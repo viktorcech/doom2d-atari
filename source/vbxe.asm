@@ -47,6 +47,127 @@
         sta MEMW+[VRAM_BCB&$FFF]+19     ; pattern
         rts
 .endp
+; SPL_TEMPLATE - the sprite list's slots in this set (frame.asm
+; lists_init; only blit_sprite & co write them, and only src/step/dst/size/
+; ctrl): src step hi 0 + mode 1, dst step 320, AND $FF, XOR 0, cmask 0 (no
+; collision cost), ctrl = BLT_TRANS + NEXT. Leaves spl_ptr at the start.
+.proc spl_template
+        lda ls_bank
+        sta VBXE_BANK_SEL
+        jsr spl_reset
+        ldx #SPRL_MAX
+?tl     ldy #20
+?tf     lda spl_tmpl,y
+        sta (spl_ptr),y
+        dey
+        bpl ?tf
+        lda spl_ptr
+        clc
+        adc #21
+        sta spl_ptr
+        bcc ?tn
+        inc spl_ptr+1
+?tn     dex
+        bne ?tl
+        ; (falls into spl_reset)
+        ert *<>spl_reset
+.endp
+; SPL_RESET - empty sprite list (spl_ptr = first slot)
+.proc spl_reset
+        lda #<SPRL_W
+        sta spl_ptr
+        lda #>SPRL_W
+        sta spl_ptr+1
+        rts
+.endp
+
+; SPL_ROOM - select the list's bank; C=1: the sprite list is full. Keeps X, Y.
+.proc spl_room
+        lda ls_bank
+        sta VBXE_BANK_SEL
+        lda spl_ptr
+        cmp #<[SPRL_W+SPRL_MAX*21]
+        lda spl_ptr+1
+        sbc #>[SPRL_W+SPRL_MAX*21]
+        rts
+.endp
+
+; SPL_END - A = the slot's ctrl (+20), then the next slot. Keeps X.
+.proc spl_end
+        ldy #20
+        sta (spl_ptr),y
+        lda spl_ptr
+        clc
+        adc #21
+        sta spl_ptr
+        bcc ?r
+        inc spl_ptr+1
+?r      rts
+.endp
+spl_tmpl dta 0,0,0, 0,0,1, 0,0,0, <SCR_W,>SCR_W,1, 0,0,0, $FF, 0,0,0,0, BLT_TRANS+$08
+; Sprite BlitterList: right after the 4 window-list slots (VRAM_BCB+0..83).
+; Room for every blit_sprite call of a frame (50 enemies + 12 pickups +
+; 16 decorations (+ their explosions) + 4 + 3 projectiles + player + 4 HUD).
+SPRL_MAX      = 110
+VRAM_SPRL     = VRAM_BCB+84
+SPRL_W        = MEMW+[VRAM_SPRL&$FFF]
+        ert [VRAM_SPRL&$FFF]+[SPRL_MAX+1]*21>$1000 ; inside the 4K MEMAC page (+1: spl_close's end after a link)
+spl_lk  dta 0,0                 ; spl_ptr right after the blood link (bl_draw)
+
+; SPL_CLOSE - the sprite list ends at its last BCB (ctrl without NEXT); an
+; empty one gets a BCB that writes nothing (the window list runs into it)
+.proc spl_close
+        lda ls_bank
+        sta VBXE_BANK_SEL
+        lda spl_ptr                     ; the blood link last (bl_draw)? Its list
+        cmp spl_lk                      ; jumps back HERE, past the link's last
+        bne ?ne                         ; slot: the end must be a BCB here too
+        lda spl_ptr+1                   ; (2026-10-30: else the old slots ran on,
+        cmp spl_lk+1                    ; an old link among them = an endless list)
+        beq ?end
+?ne     lda spl_ptr
+        cmp #<SPRL_W
+        bne ?go
+        lda spl_ptr+1
+        cmp #>SPRL_W
+        bne ?go
+?end    lda zbuf_hi                     ; (+8: the stamped bank stays: ls_stamp)
+        sta ?nop+8
+        ldy #20                         ; empty: a 1-byte mode 1 copy of a 0
+?e      lda ?nop,y
+        sta (spl_ptr),y
+        dey
+        bpl ?e
+        rts
+?go     lda spl_ptr                     ; ptr-1 = ctrl byte of the last BCB
+        bne ?d
+        dec spl_ptr+1
+?d      dec spl_ptr
+        ldy #0
+        lda (spl_ptr),y                 ; last: its mode kept, the list ends
+        and #$F7                        ; here (NEXT off)
+        sta (spl_ptr),y
+        rts
+?nop    dta <HUD_ZERO,>HUD_ZERO,^HUD_ZERO, 0,0,1, 0,0,0, <SCR_W,>SCR_W,1
+        dta 0,0,0, $FF, 0,0,0,0, BLT_TRANS
+.endp
+
+; SPL_FLUSH - the sprite list at once (menus, save slots: no frame list
+; runs there): close it, wait, START, empty it
+.proc spl_flush
+        jsr spl_close
+        jsr wait_blit                   ; START is ignored while a blit runs
+        lda #<SPRL_OFF
+        sta VBXE_BL_ADR0
+        lda ls_mid
+        ora #>SPRL_OFF
+        sta VBXE_BL_ADR1
+        lda ls_hi
+        sta VBXE_BL_ADR2
+        lda #1
+        sta VBXE_BLITTER
+        jmp spl_reset
+.endp
 
 ; XDL template: 2 entries
 ; Entry 1: 20 empty scanlines (border), no overlay
@@ -59,114 +180,6 @@ xdl_data
         dta $11,$FF             ; ov_width, ov_priority
 xdl_len = * - xdl_data
 
-; ============================================
-; INIT CLEAR (both screen buffers: banks 0-15 + $20-$2F)
-; Currently unused but kept for potential level transitions
-; ============================================
-.proc init_clear
-        ; Clear screen 0 (banks 0-15)
-        lda #0
-        sta ic_bank
-?bank1  lda ic_bank
-        ora #BANK_EN
-        sta VBXE_BANK_SEL
-        jsr ?clear_page
-        inc ic_bank
-        lda ic_bank
-        cmp #16
-        bne ?bank1
-        ; Clear screen 1 (banks $20-$2F)
-        lda #$20
-        sta ic_bank
-?bank2  lda ic_bank
-        ora #BANK_EN
-        sta VBXE_BANK_SEL
-        jsr ?clear_page
-        inc ic_bank
-        lda ic_bank
-        cmp #$30
-        bne ?bank2
-        rts
-
-?clear_page
-        lda #0
-        ldy #0
-?p      sta MEMW,y
-        sta MEMW+$100,y
-        sta MEMW+$200,y
-        sta MEMW+$300,y
-        sta MEMW+$400,y
-        sta MEMW+$500,y
-        sta MEMW+$600,y
-        sta MEMW+$700,y
-        sta MEMW+$800,y
-        sta MEMW+$900,y
-        sta MEMW+$A00,y
-        sta MEMW+$B00,y
-        sta MEMW+$C00,y
-        sta MEMW+$D00,y
-        sta MEMW+$E00,y
-        sta MEMW+$F00,y
-        iny
-        bne ?p
-        rts
-ic_bank dta 0
-.endp
-
-; upload_tiles, upload_hud_font, setup_palette - all moved to INI segments in main.asm
-
-; ============================================
-; CLEAR SCREEN (blit sky to game area 320x192, HUD area stays black)
-; ============================================
-.proc clear_screen
-        lda #BANK_EN+BANK_BCB
-        sta VBXE_BANK_SEL
-        ; src = background sky at $034000
-        lda #$00
-        sta MEMW+[VRAM_BCB&$FFF]+0
-        lda #$40
-        sta MEMW+[VRAM_BCB&$FFF]+1
-        lda #$03
-        sta MEMW+[VRAM_BCB&$FFF]+2
-        ; src step = 320 (advance each row)
-        lda #<SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+3
-        lda #>SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+4
-        lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+5
-        ; dst = back buffer ($000000 or $020000)
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+6
-        sta MEMW+[VRAM_BCB&$FFF]+7
-        lda zbuf_hi             ; $00 or $02
-        sta MEMW+[VRAM_BCB&$FFF]+8
-        ; dst step = 320
-        lda #<SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+9
-        lda #>SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+10
-        lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+11
-        ; size 320x192 (game area only, HUD at Y=192 stays black)
-        lda #<[SCR_W-1]
-        sta MEMW+[VRAM_BCB&$FFF]+12
-        lda #>[SCR_W-1]
-        sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #HUD_Y-1            ; 192-1 = 191 rows
-        sta MEMW+[VRAM_BCB&$FFF]+14
-        ; AND=$FF, copy mode
-        lda #$FF
-        sta MEMW+[VRAM_BCB&$FFF]+15
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+16
-        sta MEMW+[VRAM_BCB&$FFF]+17
-        sta MEMW+[VRAM_BCB&$FFF]+18
-        sta MEMW+[VRAM_BCB&$FFF]+19
-        sta MEMW+[VRAM_BCB&$FFF]+20
-        jsr run_blit
-        rts
-.endp
 
 ; ============================================
 ; CLEAR_FULL_BLACK - Fill entire 320x200 buffer with black (0)
@@ -190,8 +203,7 @@ ic_bank dta 0
         sta MEMW+[VRAM_BCB&$FFF]+18
         sta MEMW+[VRAM_BCB&$FFF]+19
         sta MEMW+[VRAM_BCB&$FFF]+20  ; mode 0 (fill)
-        ; dst = buffer start
-        lda #0
+        ; dst = buffer start (A = 0)
         sta MEMW+[VRAM_BCB&$FFF]+6
         sta MEMW+[VRAM_BCB&$FFF]+7
         lda zbuf_hi
@@ -211,10 +223,9 @@ ic_bank dta 0
         lda #SCR_H-1
         sta MEMW+[VRAM_BCB&$FFF]+14
         jsr run_blit
-        jsr wait_blit
-        ; Restore normal BCB state
-        lda #BANK_EN+BANK_BCB
-        sta VBXE_BANK_SEL
+        ; Restore normal BCB state: no wait - the running fill loaded its BCB
+        ; at START, and the next blit waits before its START (run_blit
+        ; leaves the bank select alone)
         lda #$FF
         sta MEMW+[VRAM_BCB&$FFF]+15  ; AND = $FF
         lda #0
@@ -223,6 +234,11 @@ ic_bank dta 0
         sta MEMW+[VRAM_BCB&$FFF]+20
         rts
 .endp
+
+; WAIT_RUN - wait_blit, then fall into run_blit (the callers' shared tail)
+wait_run
+        jsr wait_blit           ; START is ignored while a blit runs
+        ert *<>run_blit
 
 ; ============================================
 ; RUN_BLIT - Start VBXE blitter (no wait — caller must ensure idle)
@@ -238,19 +254,19 @@ ic_bank dta 0
         sta VBXE_BL_ADR2       ;   hi
         lda #1
         sta VBXE_BLITTER       ; start blit (async)
+        sta cbw_k0             ; A = 1: set A's window slot 0 changed (camera.asm)
         rts
 .endp
 
-; WAIT_BLIT - Wait for blitter + do deferred sound VRAM reads
-; 2026-04-08: Calls snd_poll while waiting — does pending VRAM reads
-; during blitter dead time instead of wasting cycles in tight loop.
+; WAIT_BLIT - wait for the blitter. Hardened: idle only when BUSY reads 0
+; twice in a row - BUSY can drop to 0 for an instant between chained BCBs
+; (the window list), and a START in that gap restarts the list.
 .proc wait_blit
-        lda VBXE_BLITTER
-        beq ?done
-?w      jsr snd_poll
-        lda VBXE_BLITTER
+?w      lda VBXE_BLITTER
         bne ?w
-?done   rts
+        lda VBXE_BLITTER        ; second read
+        bne ?w
+        rts
 .endp
 
 ; ============================================
@@ -276,211 +292,64 @@ ic_bank dta 0
 ; Buffer high byte: $00 for screen 0, $02 for screen 1
 zbuf_hi dta 0
 
-; PAL/NTSC flag: 0=NTSC, non-zero=PAL
-is_pal  dta 0
-
-; ============================================
-; BLIT TILE 16x16
-; src = $01:(r_tile):$00
-; ============================================
-.proc blit_tile
-        ; Check bit 7 = BG variant (same texture, non-solid, draw with sky bg)
-        lda #0
-        sta bt_is_bg
-        lda r_tile
-        bpl ?no_bg_flag
-        and #$7F            ; strip bit 7
-        sta r_tile
-        lda #1
-        sta bt_is_bg
-        jmp ?draw_bg
-?no_bg_flag
-        ; Check if one-way tile, half-height or switch (needs bg + transparent blit)
-        tax
-        lda tile_oneway,x
-        bne ?draw_bg
-        lda tile_halfh,x
-        bne ?draw_bg
-        lda r_tile
-        cmp #TILE_SWITCH_OFF
-        beq ?draw_bg
-        cmp #TILE_SWITCH_ON
-        beq ?draw_bg
-        cmp #TILE_EXIT_SW_OFF
-        beq ?draw_bg
-        cmp #TILE_EXIT_SW_ON
-        beq ?draw_bg
-        cmp #15             ; barrel solid tile — draw with BG
-        beq ?draw_bg
-        jmp ?normal_sub
-?draw_bg
-        ; First: draw background at this tile position
-        ; Check bg override table (for switches/platforms on wall BG)
-        lda r_tile
-        pha                 ; save original tile index
-        ldx #0
-?ov_lp  cpx tile_bg_cnt
-        bcs ?ov_sky         ; no override, draw sky
-        lda tile_bg_col,x
-        cmp r_col
-        bne ?ov_nx
-        lda tile_bg_row,x
-        cmp r_row
-        bne ?ov_nx
-        ; Found override — draw BG tile opaque, then switch transparent on top
-        lda tile_bg_tid,x
-        sta r_tile
-        lda #0
-        sta bt_is_bg        ; draw BG tile as normal opaque
-        jsr ?normal_sub     ; draw the BG tile (opaque)
-        jmp ?ov_done
-?ov_nx  inx
-        jmp ?ov_lp
-?ov_sky jsr blit_bg         ; copies sky from VRAM $034000+ at r_col,r_row
-?ov_done
-        pla
-        sta r_tile          ; restore original tile
-        lda #1
-        sta bt_is_bg        ; force transparent for the overlay tile
-        ; Then: draw overlay tile with BLT_TRANS
-        jsr ?normal_sub
-?skip   rts
-
-?normal_sub
-        jsr wait_blit
-        lda #BANK_EN+BANK_BCB
-        sta VBXE_BANK_SEL
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+0
-        lda r_tile
-        cmp #TILE_SOLIDFLR
-        bne ?not_sflr
-        lda #12             ; solid floor uses metalflr texture
-?not_sflr
-        cmp #16
-        bcs ?newtile
-        ; Old tiles 0-15: VRAM $01:tile:$00
-        sta MEMW+[VRAM_BCB&$FFF]+1
-        lda #$01
-        sta MEMW+[VRAM_BCB&$FFF]+2
-        jmp ?tileok
-?newtile
-        ; Switch tiles 28-29: VRAM $06:(tile-28):$00
-        cmp #TILE_SWITCH_OFF
-        bcc ?oldnew
-        sec
-        sbc #TILE_SWITCH_OFF ; 28→0, 29→1
-        sta MEMW+[VRAM_BCB&$FFF]+1
-        lda #$06
-        sta MEMW+[VRAM_BCB&$FFF]+2
-        jmp ?tileok
-?oldnew
-        ; New tiles 16-27: VRAM $03:(tile+$10):$00
-        clc
-        adc #$10            ; tile 16 → $20, tile 17 → $21...
-        sta MEMW+[VRAM_BCB&$FFF]+1
-        lda #$03
-        sta MEMW+[VRAM_BCB&$FFF]+2
-?tileok
-        lda #TW
-        sta MEMW+[VRAM_BCB&$FFF]+3
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+4
-        sta zdxh
-        lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+5
-        lda r_col
-        asl
-        asl
-        asl
-        asl
-        rol zdxh            ; capture carry for cols 16-19
-        sta zdx
-        lda r_row
-        asl
-        asl
-        asl
-        asl
-        sta zdy
-        jsr calc_dst
-        lda zva
-        sta MEMW+[VRAM_BCB&$FFF]+6
-        lda zva+1
-        sta MEMW+[VRAM_BCB&$FFF]+7
-        lda zva+2
-        sta MEMW+[VRAM_BCB&$FFF]+8
-        ; dst step [9-11], AND [15], XOR [16-19] pre-filled
-        lda #TW-1
-        sta MEMW+[VRAM_BCB&$FFF]+12
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #TH-1
-        sta MEMW+[VRAM_BCB&$FFF]+14
-        ; Blitter mode: transparent for BG/one-way/switch tiles, opaque for rest
-        lda bt_is_bg
-        bne ?trans
-        lda r_tile
-        tax
-        lda tile_oneway,x
-        bne ?trans
-        lda tile_halfh,x
-        bne ?trans
-        lda r_tile
-        cmp #TILE_SWITCH_OFF
-        beq ?trans
-        cmp #TILE_SWITCH_ON
-        beq ?trans
-        cmp #TILE_EXIT_SW_OFF
-        beq ?trans
-        cmp #TILE_EXIT_SW_ON
-        beq ?trans
-        lda #0              ; BLT_COPY (opaque)
-        beq ?setm
-?trans  lda #BLT_TRANS      ; transparent (skip index 0)
-?setm   sta MEMW+[VRAM_BCB&$FFF]+20
-        jsr run_blit
-        rts
-bt_is_bg dta 0
-.endp
-
-; Tile BG override table (max 8 entries)
-MAX_TILE_BG = 8
-tile_bg_cnt dta 0
-tile_bg_col .ds MAX_TILE_BG
-tile_bg_row .ds MAX_TILE_BG
-tile_bg_tid .ds MAX_TILE_BG
+; Frames per second threshold (60 NTSC / 50 PAL), set once at init
+fps_thr dta 60
+; Tile texture source address (TW x TH = 64 B per tile, 256 tiles), lo/mid
+; bytes; the bank byte is constant. Page-aligned in free RAM below the code.
+tile_src_save = *
+        org $0900
+tile_src_lo
+        :256 dta <[VRAM_TILESET+#*TW*TH]
+tile_src_mi
+        :256 dta >[VRAM_TILESET+#*TW*TH]
+        org tile_src_save
+        ert [VRAM_TILESET&$FFFF]+256*TW*TH>$10000   ; one bank byte for all tiles
 
 ; ============================================
 ; BLIT SPRITE (transparent — color 0 = see-through)
 ; Input: A = sprite index, zdx/zdxh = X pos, zdy = Y pos
-; Sprites stored in VRAM at: spr_off_bank:(spr_off_hi+$10):spr_off_lo
+; Sprites (data/spr_small.asm) at spr_off_bank:spr_off_hi:spr_off_lo.
 ; Handles right-edge and bottom-edge clipping automatically.
 ; ============================================
 .proc blit_sprite
         tax
+        ; --- Camera offset (world sprites): screen X = world X - cam_x ---
+        ; spr_cam=0 for HUD (screen-fixed). Off-left (result <0 -> zdxh>=$80)
+        ; is culled by the right-edge clip below (zdxh>=2 -> skip).
+        lda spr_cam
+        beq ?nocam
+        lda zdx
+        sec
+        sbc cam_x
+        sta zdx
+        lda zdxh
+        sbc cam_x_hi
+        sta zdxh
+        lda zdy                 ; screen Y = (zdy_hi:zdy world) - (cam_y_hi:cam_y)
+        sec
+        sbc cam_y
+        sta zdy
+        lda zdy_hi
+        sbc cam_y_hi
+        jne ?skip               ; hi != 0 -> off-screen vertically -> cull
+?nocam
         ; --- Right-edge clipping ---
         ; Screen is 320px wide. zdxh:zdx is 16-bit X position.
         ; zdxh>=2: entirely off screen (X>=512)
         ; zdxh=1:  partially visible, clip to 320-256=64 available px
         ; zdxh=0:  fully visible (max right edge = 255+16 = 271 < 320)
-        lda zdxh
-        cmp #2
-        bcc ?xlt2
-        jmp ?skip
-?xlt2   cmp #1
-        beq ?clip_r
-        lda spr_w,x
-        sta bs_w
-        jmp ?chk_bot
-?clip_r lda #64                 ; available pixels = 320 - 256 - zdx
-        sec
+        lda zdxh                ; 2026-11-10 6502-idioms.md "cmp #0 after lda:
+        beq ?clip_rok           ; Z is already set": 0 first, then 1, else skip
+        cmp #1
+        jne ?skip
+?clip_r lda #64                 ; available pixels = 320 - 256 - zdx (C=1: equal)
         sbc zdx
         beq ?cr_off
         bcc ?cr_off             ; zdx >= 64: sprite fully off right edge
         cmp spr_w,x
         bcs ?clip_rok           ; available >= sprite width: no clip needed
         sta bs_w                ; clipped width = available pixels
-        jmp ?chk_bot
+        bcc ?chk_bot            ; (always: bcs not taken)
 ?cr_off jmp ?skip
 ?clip_rok
         lda spr_w,x
@@ -488,141 +357,352 @@ tile_bg_tid .ds MAX_TILE_BG
 
 ?chk_bot
         ; --- Bottom-edge clipping ---
-        ; If sprite extends below Y=200, reduce height
+        ; World sprites (spr_cam=1) clip at GAME_H: the HUD band below is only
+        ; redrawn on change, so they must never paint into it. HUD sprites
+        ; (spr_cam=0) clip at SCR_H: weapon/key icons live at Y=184-199.
+        lda #GAME_H
+        ldy spr_cam
+        bne ?cl_set
+        lda #SCR_H
+?cl_set sta bs_clip
+        lda zdy
+        cmp bs_clip
+        jcs ?skip               ; top edge below clip line -> fully culled
+                                ; (otherwise clip-zdy underflows to a huge height)
         lda spr_h,x
         sta bs_h
-        lda zdy
-        clc
-        adc bs_h
-        cmp #SCR_H+1
+        adc zdy                 ; C=0 (jcs not taken)
+        cmp bs_clip
         bcc ?no_bclip
-        lda #SCR_H              ; clipped height = 200 - zdy
-        sec
-        sbc zdy
-        bne ?bclip_ok
-        jmp ?skip
-?bclip_ok
+        beq ?no_bclip           ; bottom == clip line exactly -> fits
+        lda bs_clip             ; clipped height = clip - zdy
+        sbc zdy                 ; C=1 (bcc not taken); zdy < bs_clip -> 1..
         sta bs_h
 ?no_bclip
-        ; --- Wait for previous blit, then configure BCB ---
-        jsr wait_blit
-        lda #BANK_EN+BANK_BCB
+        lda spr_cam             ; a world sprite: its rect for fore_part
+        beq ?hud
+        jsr sr_add              ; (keeps X)
+?hud
+        ; --- Append a BCB to the frame's sprite list (spl_flush starts the
+        ; whole list once, after the window copy). The CPU builds it while
+        ; the blitter copies the window: no wait here. Constant fields come
+        ; from the setup_xdl template; order of the list = order of calls.
+        lda ls_bank             ; the set being built (frame.asm)
         sta VBXE_BANK_SEL
-        ; Source VRAM address from lookup tables
-        ; Final addr = spr_off_bank:(spr_off_hi+$10):spr_off_lo
-        ; The +$10 offset is because sprites start at VRAM $01_10_00
+        ldy #0                          ; source VRAM address (spr_small.asm)
         lda spr_off_lo,x
-        sta MEMW+[VRAM_BCB&$FFF]+0     ; src addr lo
+        sta (spl_ptr),y                 ; +0 src addr lo
+        iny
         lda spr_off_hi,x
-        clc
-        adc #$10
-        sta MEMW+[VRAM_BCB&$FFF]+1     ; src addr mid
+        sta (spl_ptr),y                 ; +1 src addr mid
+        iny
         lda spr_off_bank,x
-        adc #0                          ; propagate carry
-        sta MEMW+[VRAM_BCB&$FFF]+2     ; src addr hi
+        sta (spl_ptr),y                 ; +2 src addr hi
+        iny
         ; Source row step = full sprite width (not clipped, to skip hidden cols)
         lda spr_w,x
-        sta MEMW+[VRAM_BCB&$FFF]+3     ; src step lo
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+4     ; src step hi
+        sta (spl_ptr),y                 ; +3 src step lo (hi 0: template)
+        ldy #5
         lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+5     ; src step mode
-        ; Destination = screen position (calc_dst uses zdx/zdxh/zdy/zbuf_hi)
-        jsr calc_dst
-        lda zva
-        sta MEMW+[VRAM_BCB&$FFF]+6     ; dst addr lo
-        lda zva+1
-        sta MEMW+[VRAM_BCB&$FFF]+7     ; dst addr mid
-        lda zva+2
-        sta MEMW+[VRAM_BCB&$FFF]+8     ; dst addr hi
-        ; dst step [9-11], AND [15], XOR [16-19] pre-filled by setup_xdl
-        ; Blit size = (clipped width - 1) x (clipped height - 1)
+        sta (spl_ptr),y                 ; +5 src step x (blit_frame mirrors: $FF)
+        ; Destination = y_addr[zdy] + zdx + buffer base (calc_dst, written
+        ; straight into the BCB)
+        ldx zdy
+        lda y_addr_lo,x
+        clc
+        adc zdx
+        ldy #6
+        sta (spl_ptr),y                 ; +6 dst addr lo
+        iny
+        lda y_addr_hi,x
+        adc zdxh
+        sta (spl_ptr),y                 ; +7 dst addr mid
+        ; Blit size = (clipped width - 1) x (clipped height - 1); width-1 hi,
+        ; dst step, AND, XOR, cmask: template
         lda bs_w
-        sec
-        sbc #1
-        sta MEMW+[VRAM_BCB&$FFF]+12    ; width-1 lo
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+13    ; width-1 hi
+        sbc #0                          ; C=0: bs_w-1; bs_w >= 1 -> leaves C=1
+        ldy #12
+        sta (spl_ptr),y                 ; +12 width-1 lo
         lda bs_h
-        sec
-        sbc #1
-        sta MEMW+[VRAM_BCB&$FFF]+14    ; height-1
-        lda #BLT_TRANS                  ; transparent: skip color 0
-        sta MEMW+[VRAM_BCB&$FFF]+20    ; blit mode
-        jsr run_blit
+        sbc #1                          ; C=1 from above
+        ldy #14
+        sta (spl_ptr),y                 ; +14 height-1
+        lda #BLT_TRANS+$08              ; transparent + NEXT (spl_flush ends it)
+        ldy #20
+        sta (spl_ptr),y                 ; +20 ctrl
+        lda spl_ptr                     ; next slot
+        adc #21-1                       ; C=1 from the height sbc: +21
+        sta spl_ptr
+        bcc ?skip
+        inc spl_ptr+1
 ?skip   rts
 .endp
 
-bs_w    dta 0
-bs_h    dta 0
-
-; ============================================
-; BLIT BG 16x16 (restore sky background for empty tiles)
-; src = sky VRAM at $034000 + r_row*5120 + r_col*16
-; ============================================
-.proc blit_bg
-        jsr wait_blit
-        lda #BANK_EN+BANK_BCB
-        sta VBXE_BANK_SEL
-        ; Source: background VRAM at bg_row[r_row] + r_col*16
-        lda r_col
-        asl
-        asl
-        asl
-        asl                         ; r_col*16, C=1 if r_col>=16
-        sta MEMW+[VRAM_BCB&$FFF]+0  ; src lo
-        ldy r_row
-        lda bg_row_mid,y
-        adc #0                      ; add carry from r_col*16 overflow
-        sta MEMW+[VRAM_BCB&$FFF]+1  ; src mid
-        lda bg_row_hi,y
-        sta MEMW+[VRAM_BCB&$FFF]+2  ; src hi
-        ; src step = 320 (same pitch as screen)
-        lda #<SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+3
-        lda #>SCR_W
-        sta MEMW+[VRAM_BCB&$FFF]+4
-        lda #1
-        sta MEMW+[VRAM_BCB&$FFF]+5
-        ; Destination: screen at (r_col*16, r_row*16)
-        lda #0
-        sta zdxh
-        lda r_col
-        asl
-        asl
-        asl
-        asl
-        rol zdxh            ; capture carry for cols 16-19
-        sta zdx
-        lda r_row
-        asl
-        asl
-        asl
-        asl
-        sta zdy
-        jsr calc_dst
-        lda zva
-        sta MEMW+[VRAM_BCB&$FFF]+6
-        lda zva+1
-        sta MEMW+[VRAM_BCB&$FFF]+7
-        lda zva+2
-        sta MEMW+[VRAM_BCB&$FFF]+8
-        ; dst step [9-11], AND [15], XOR [16-19] pre-filled
-        lda #TW-1
-        sta MEMW+[VRAM_BCB&$FFF]+12
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+13
-        lda #TH-1
-        sta MEMW+[VRAM_BCB&$FFF]+14
-        lda #0
-        sta MEMW+[VRAM_BCB&$FFF]+20     ; mode=0 (opaque copy)
-        jsr run_blit
+; SR_ADD - this world sprite's screen rect for fore_part's pass-2 reject:
+; x/2, ceil((x+w)/2), y, y+h (zdxh:zdx, zdy, bs_w, bs_h, clipped). Past
+; SR_MAX: sr_n = $FF, every foreground part draws. Keeps X.
+.proc sr_add
+        ldy sr_n
+        cpy #SR_MAX
+        bcs ?full               ; (also sr_n = $FF already)
+        lda zdxh
+        lsr
+        lda zdx
+        ror
+        sta sr_x0,y
+        lda zdx
+        clc
+        adc bs_w
+        sta ?l+1
+        lda zdxh
+        adc #0
+        lsr
+?l      lda #0                  ; (patched: (x+w) lo)
+        ror
+        adc #0                  ; C = the dropped bit: ceil (< 256: C=0)
+        sta sr_x1,y
+        lda zdy
+        sta sr_y0,y
+        adc bs_h
+        sta sr_y1,y
+        iny
+        sty sr_n
+        rts
+?full   lda #$FF
+        sta sr_n
         rts
 .endp
 
-; Background row address lookup (12 entries)
-; Address = $034000 + row * 5120 ($1400)
-bg_row_mid
-        dta $40,$54,$68,$7C,$90,$A4,$B8,$CC,$E0,$F4,$08,$1C
-bg_row_hi
-        dta $03,$03,$03,$03,$03,$03,$03,$03,$03,$03,$04,$04
+; SR_HIT - C=1: a world sprite of this frame overlaps the foreground part
+; fo_x (16-bit), fo_y, bs_w x bs_h (or sr_n = $FF: assume one does).
+.proc sr_hit
+        ldx sr_n
+        bmi ?yes
+        beq ?no                 ; (C=1 from nothing: clear it)
+        lda fo_x+1              ; x/2, ceil((x+w)/2), y+h as sr_add keeps them
+        lsr
+        lda fo_x
+        ror
+        sta ?x0+1
+        lda fo_x
+        clc
+        adc bs_w
+        sta ?l+1
+        lda fo_x+1
+        adc #0
+        lsr
+?l      lda #0                  ; (patched: (x+w) lo)
+        ror
+        adc #0                  ; C = the dropped bit: ceil
+        sta ?x1+1
+        lda fo_y
+        sta ?fy+1
+        adc bs_h                ; C=0: the ceil above is < 256
+        sta ?y1+1
+        dex                     ; sprites, last first, down to 0 (sr_n <= SR_MAX)
+?lp     lda sr_x0,x             ; overlap on both axes?
+?x1     cmp #0
+        bcs ?nx
+?x0     lda #0
+        cmp sr_x1,x
+        bcs ?nx
+        lda sr_y0,x
+?y1     cmp #0
+        bcs ?nx
+?fy     lda #0                  ; (patched: fo_y)
+        cmp sr_y1,x
+        bcc ?yes
+?nx     dex
+        bpl ?lp
+?no     clc
+        rts
+?yes    sec
+        rts
+.endp
+
+; ============================================
+; BLIT_FRAME - append one monster frame (mon_frames.asm mf_*) to the sprite
+; list, clipped to the game window on all four sides.
+; X = frame, zdxh:zdx / zdy_hi:zdy = its top-left in the world, bf_mir =
+; $FF to draw it mirrored (source read right to left: step x -1), else 0.
+; Frames are at most 64 wide (prepare_sprites.py), so x in 0..255 always
+; fits the 320 px screen.
+; ============================================
+; IT_BLIT - item frame Y (it_*): its record into IT_SLOT, drawn unmirrored
+.proc it_blit
+        lda it_lo,y
+        sta mf_lo+IT_SLOT
+        lda it_mi,y
+        sta mf_mi+IT_SLOT
+        lda it_bk,y
+        sta mf_bk+IT_SLOT
+        lda it_w,y
+        sta mf_w+IT_SLOT
+        lda it_h,y
+        sta mf_h+IT_SLOT
+        lda #0
+        sta bf_mir
+        ldx #IT_SLOT
+.endp
+        ert *<>blit_frame       ; falls through
+.proc blit_frame
+        lda zdx                 ; screen = world - camera (16-bit signed)
+        sec
+        sbc cam_x
+        sta zdx
+        lda zdxh
+        sbc cam_x_hi
+        sta zdxh
+        lda zdy
+        sec
+        sbc cam_y
+        sta zdy
+        lda zdy_hi
+        sbc cam_y_hi
+        beq ?yin
+        cmp #$FF
+        jne ?skip
+        lda zdy                 ; above the top: visible rows = h + y
+        clc
+        adc mf_h,x
+        jcc ?skip
+        jeq ?skip
+        sta bs_h
+        lda #0                  ; C=1 (jcc not taken)
+        sbc zdy
+        sta bf_top              ; rows cut off at the top
+        lda #0
+        sta zdy
+        beq ?x                  ; (always: y 0 + h <= 64 needs no bottom clip)
+?yin    sta bf_top              ; A = 0
+        lda zdy
+        cmp #GAME_H
+        jcs ?skip
+        lda mf_h,x              ; C=0 (jcs not taken)
+        sta bs_h
+        adc zdy                 ; bottom: clip at GAME_H (the HUD below)
+        cmp #GAME_H+1
+        bcc ?x
+        lda #GAME_H
+        sbc zdy                 ; C=1
+        sta bs_h
+?x      lda mf_w,x
+        sta bs_w
+        lda zdxh                ; A = columns cut off at the left (0 here)
+        beq ?src
+        bmi ?xneg
+        cmp #1
+        jne ?skip
+        lda #320-256            ; x = 256+zdx: room = 64 - zdx (C=1: cmp #1 equal)
+        sbc zdx
+        jcc ?skip
+        jeq ?skip
+        cmp bs_w
+        bcs ?s0
+        sta bs_w
+?s0     lda #0                  ; none cut at the left
+        beq ?src                ; (always)
+?xneg   cmp #$FF
+        jne ?skip
+        lda zdx                 ; left of the screen: visible = w + x
+        clc
+        adc bs_w
+        jcc ?skip
+        jeq ?skip
+        sta bs_w
+        lda #0                  ; C=1 (jcc not taken)
+        sbc zdx                 ; columns cut off at the left
+        ldy #0
+        sty zdx
+        sty zdxh
+        ; 2026-11-10 6502-idioms.md "no RAM cell for a value that only waits":
+        ; the left cut stays in A (no bf_left); sr_add is the tail (below)
+?src    ldy ls_bank             ; the set being built (frame.asm)
+        sty VBXE_BANK_SEL
+        ldy bf_mir              ; first column: left, mirrored w-1-left
+        beq ?c
+        eor #$FF
+        clc
+        adc mf_w,x
+?c      ldy bf_top
+        bne ?cut                ; rare: rows cut at the top (out of line)
+        clc                     ; source = frame + first column, into the BCB
+        adc mf_lo,x
+        ldy #0
+        sta (spl_ptr),y                 ; +0 src addr
+        lda mf_mi,x
+        adc #0
+        iny
+        sta (spl_ptr),y                 ; +1
+        lda mf_bk,x
+?hi     adc #0
+        iny
+        sta (spl_ptr),y                 ; +2 (a bank + carry < 256: C=0)
+        iny
+        lda mf_w,x
+        sta (spl_ptr),y                 ; +3 src step y = full width
+        ldy #5
+        lda bf_mir
+        ora #1
+        sta (spl_ptr),y                 ; +5 src step x: 1, mirrored $FF
+        ldx zdy                         ; dst = y_addr[zdy] + zdx + buffer
+        lda y_addr_lo,x                 ; C=0 (the bank byte above)
+        adc zdx
+        iny
+        sta (spl_ptr),y                 ; +6 dst addr lo
+        iny
+        lda y_addr_hi,x
+        adc zdxh
+        sta (spl_ptr),y                 ; +7
+        lda bs_w
+        sbc #0                          ; C=0: w-1, leaves C=1
+        ldy #12
+        sta (spl_ptr),y                 ; +12 width-1
+        lda bs_h
+        sbc #1                          ; C=1
+        ldy #14
+        sta (spl_ptr),y                 ; +14 height-1
+        lda #BLT_TRANS+$08              ; transparent + NEXT (spl_flush ends it)
+        ldy #20
+        sta (spl_ptr),y                 ; +20 ctrl
+        lda spl_ptr                     ; next slot
+        adc #21-1                       ; C=1 from the height sbc: +21
+        sta spl_ptr
+        bcc ?sr
+        inc spl_ptr+1
+        ; 2026-11-10 6502-idioms.md "jsr X / rts -> jmp X": this sprite's rect
+        ; last (sr_add reads only zdx, zdxh, zdy, bs_w, bs_h)
+?sr     jmp sr_add
+?skip   rts
+?cut    clc                     ; A = first column, Y = rows cut at the top:
+        adc mf_lo,x             ; source = frame + column + top*w
+        pha                     ; (lo parked; A carries it through the loop)
+        lda mf_mi,x
+        adc #0
+        sta bf_src
+        lda mf_bk,x
+        adc #0
+        sta bf_src+1
+        pla
+?tl     clc
+        adc mf_w,x
+        bcc ?tn
+        inc bf_src
+        bne ?tn
+        inc bf_src+1
+?tn     dey
+        bne ?tl
+        sta (spl_ptr),y                 ; +0 src addr (Y = 0)
+        lda bf_src
+        iny
+        sta (spl_ptr),y                 ; +1
+        lda bf_src+1
+        clc                             ; ?hi adds 0, leaves C=0
+        bcc ?hi                         ; (always)
+.endp
+bf_src  dta 0,0                 ; mid, bank of the top-cut source
+
+; bs_w/bs_h moved to zero page (zeropage.asm)
+
+; (blit_bg + bg_row tables deleted 2026-06-10: dead since the scroll rewrite -
+;  empty tiles stay color 0 in the bg canvas and the parallax sky shows through)

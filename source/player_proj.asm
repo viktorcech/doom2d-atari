@@ -10,6 +10,7 @@ proj_a  .ds MAX_PROJ
 proj_x  .ds MAX_PROJ
 proj_xh .ds MAX_PROJ            ; X high byte (for positions > 255)
 proj_y  .ds MAX_PROJ
+proj_y_hi .ds MAX_PROJ         ; Y high byte (16-bit for tall maps)
 proj_vx .ds MAX_PROJ
 proj_dmg .ds MAX_PROJ           ; damage per projectile (from weapon)
 proj_spr .ds MAX_PROJ           ; sprite index per projectile
@@ -32,6 +33,9 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
         sec
         sbc #14             ; gun height (chest level)
         sta proj_y,x
+        lda zpy_hi
+        sbc #0              ; 16-bit Y
+        sta proj_y_hi,x
         ; Set damage and sprite from saved weapon (auto-switch may have changed zpwcur)
         ldy player_update.fire_wcur
         lda weap_dmg,y
@@ -41,8 +45,7 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
         lda zpdir
         bne ?pl
         lda #3
-        sta proj_vx,x
-        rts
+        dta $2C                 ; bit $FDA9 (no I/O): skips lda #$FD
 ?pl     lda #$FD
         sta proj_vx,x
         rts
@@ -52,7 +55,10 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
         ldx #0
 ?lp     lda proj_a,x
         bne ?upd
-        jmp ?nx
+?nx     inx                  ; next slot (ascending order kept)
+        cpx #MAX_PROJ
+        bne ?lp
+        rts
 ?upd    ; Update 16-bit X: proj_xh:proj_x += proj_vx (signed)
         lda proj_x,x
         clc
@@ -64,31 +70,22 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
         ; Positive velocity: xh += carry
         lda proj_xh,x
         adc #0
-        sta proj_xh,x
-        jmp ?bounds
+        sta proj_xh,x        ; N,Z = new xh (from adc, binary mode)
+        bpl ?xin             ; (always: a live xh is 0..3, +1 at most)
 ?neg    ; Negative velocity: xh += $FF + carry
         lda proj_xh,x
         adc #$FF
         sta proj_xh,x
-?bounds ; Kill if off screen
-        lda proj_xh,x
-        bmi ?kill            ; xh < 0: past left edge
-        cmp #2
-        bcs ?kill            ; xh >= 2: past 512
-        cmp #1
-        bne ?chk_wall        ; xh = 0: check wall
-        ; xh = 1: kill if past right edge (X > 320 = xh=1,lo=64)
-        lda proj_x,x
-        cmp #64
-        bcs ?kill
-?chk_wall
-        ; Check hit against barrels FIRST (before tile check,
-        ; because barrel uses invisible solid tile 15)
+        ; Kill if off the map; A, N, Z = proj_xh,x. Past the right edge inside
+        ; the last 256 px the tile test kills it (off the map reads as solid).
+        jmi ?kill            ; xh < 0: past left edge
+?xin    cmp #[MAP_W*TW+255]/256
+        jcs ?kill            ; xh past the map's last page
+        ; One tile lookup covers walls AND barrels: a barrel IS the invisible
+        ; solid tile 15 it wrote into the map, so hitting that tile means
+        ; hitting the barrel. (The old code scanned all 16 decorations for
+        ; every projectile every frame just to get ahead of the tile test.)
         stx zt
-        jsr check_proj_barrels
-        bcs ?nx3            ; hit barrel
-        ; Check if projectile center hit a solid tile
-        ldx zt
         lda proj_x,x
         clc
         adc #4              ; center of 8x8 sprite
@@ -98,68 +95,64 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
         sta gt_px_hi
         lda proj_y,x
         sta gt_py
-        stx zt2
-        jsr check_solid
-        pha
-        ldx zt2
-        pla
+        lda proj_y_hi,x
+        sta gt_py_hi
+        jsr get_tile_at16   ; preserves X; A = tile, gt_col/gt_row set
+        bmi ?tile_open      ; bit7 = BG tile, passable
+        cmp #15
+        beq ?hit_barrel
+        tay
+        lda tile_solid,y
         bne ?kill
-        ; Check hit against all enemies
+?tile_open
+        lda tr_shot             ; D2DF PressR: the level's SHOT triggers
+        and #AC_SHOT            ; under the flying projectile
+        beq ?ns
+        jsr pj_shot             ; A = 0: its cell
         ldx zt
-        stx zt
+?ns     ; Check hit against all enemies
         jsr check_proj_enemies
-        bcc ?no_ehit
+        bcc ?nx3            ; no hit: ldx zt and next slot (was ldx zt / jmp ?nx)
         ; Enemy hit — check if BFG for radius blast
         ldx zt
         lda proj_spr,x
         cmp #SPR_BFG_PROJ1
-        bne ?nx3            ; not BFG, done
+        bne ?nx4            ; not BFG, done (X = zt)
         jsr bfg_blast
-        txa
-        pha
-        ldx #SFX_BFGXPL
+        ldx #SFX_BFGXPL     ; (old txa/pha..pla/tax: X reloaded from zt at ?nx3)
         jsr snd_play
-        pla
-        tax
-        jmp ?nx3
-?no_ehit
-        ldx zt
-        jmp ?nx
+        beq ?nx3            ; (always: snd_play ends ldy #0 / tay of a 0)
+?hit_barrel                     ; X = zt (stx zt; get_tile_at16 preserves X)
+        jsr proj_hit_barrel     ; damages the barrel owning (gt_col,gt_row)
+        ldx zt                  ; then die like any other wall hit, so a
+                                ; rocket still gets its splash + boom and a
+                                ; BFG still gets its blast
 ?kill   lda proj_spr,x
         cmp #SPR_ROCKET_PROJ
         bne ?chk_bfg
-        jsr rocket_splash_player
-        txa
-        pha
+        jsr rocket_splash_player ; spr = rocket: it sets rs_proj = X
         ldx #SFX_BAREXP
         jsr snd_play
-        pla
-        tax
-        jmp ?no_ksnd
+        lda #4                  ; D2DF PressC: rad 60 = 3.75 cells
+        jsr pj_shot
+        ldx rs_proj
+        bpl ?no_ksnd            ; (always: a slot < MAX_PROJ)
 ?chk_bfg
         cmp #SPR_BFG_PROJ1
         bne ?no_ksnd
-        jsr bfg_blast
-        txa
-        pha
+        jsr bfg_blast           ; sets bf_proj = X
         ldx #SFX_BFGXPL
         jsr snd_play
-        pla
-        tax
+        ldx bfg_blast.bf_proj
 ?no_ksnd
         lda #0
         sta proj_a,x
-?nx     inx
-        cpx #MAX_PROJ
-        beq ?end
-        jmp ?lp
-?end    rts
+        beq ?nx4                ; (always)
 ?nx3    ldx zt
-        inx
+?nx4    inx
         cpx #MAX_PROJ
-        beq ?end2
-        jmp ?lp
-?end2   rts
+        jne ?lp
+        rts
 .endp
 
 ; ============================================
@@ -167,69 +160,42 @@ proj_spr .ds MAX_PROJ           ; sprite index per projectile
 ; ============================================
 pl_dead_timer dta 0
 pl_pain_timer dta 0
+pl_expl_iframe dta 0    ; explosion-damage immunity, ticked in player_update.
+                        ; Splash has no i-frames in DOOM either, but there a
+                        ; barrel chain is one blast per barrel spread over a
+                        ; second; here five barrels can land five full 100-dmg
+                        ; hits inside ~10 frames, which is unsurvivable.
 
 .proc player_dead
-        ; Mark dirty at player position (ensure sprite cleanup between frames)
-        lda zpx
-        sta zdx
-        lda zpx_hi
-        sta zdxh
-        lda zpy
-        sec
-        sbc #32
-        bcs ?dy_ok
-        lda #0
-?dy_ok  sta zdy
-        lda #16
-        sta md_w
-        lda #32
-        sta md_h
-        jsr mark_dirty_sprite
-
         lda pl_dead_timer
-        bne ?counting
-        ; First frame of death: play sound, init timer
+        beq ?first
+?counting                       ; A = pl_dead_timer
+        ; Increment death timer (for animation), saturating at 255
+        cmp #255
+        beq ?wait
+        adc #1                  ; C=0: cmp #255 not equal, so A < 255
+        sta pl_dead_timer
+?wait
+        ; Auto-restart after ~3s (timer=180); A = pl_dead_timer
+        cmp #180
+        bcc ?done
+        lda #$FF
+        sta CH
+        jsr sio_quiet           ; silence, the sample IRQ off
+        lda #0
+        sta pl_dead_timer
+        jsr load_level
+        jsr init_game
+        jmp init_render         ; tail call (it also forces the HUD redraw)
+?done   rts
+?first  ; First frame of death: play sound, init timer
         lda #0
         sta snd_lock
         ldx #SFX_PLDEATH
         jsr snd_play
         lda #1
         sta pl_dead_timer
-?counting
-        ; Increment death timer (for animation)
-        lda pl_dead_timer
-        cmp #255
-        beq ?wait
-        inc pl_dead_timer
-?wait
-        ; Auto-restart after ~3s (timer=180)
-        lda pl_dead_timer
-        cmp #180
-        bcc ?done
-        lda #$FF
-        sta $02FC
-        lda #0
-        sta snd_active
-        sta AUDC4
-        sta pl_dead_timer
-        lda POKMSK
-        and #$FE
-        sta POKMSK
-        sta IRQEN
-        jsr load_level
-        jsr init_game
-        jsr init_render
-        lda #$FF
-        sta hud_prev_hp
-        sta hud_prev_ammo
-        sta hud_prev_weap
-        sta hud_prev_keys
-        sta hud_prev_armor
-        lda #2
-        sta hud_frames
-        lda #2
-        sta hud_full_clear
-?done   rts
+        bne ?counting           ; Z=0 from lda #1; A = 1
 .endp
 
 ; ============================================
@@ -249,61 +215,56 @@ BFG_BLAST_DMG = 20
         sta gt_px_hi
         lda proj_y,x
         sta gt_py
-        jsr check_solid
+        lda proj_y_hi,x
+        sta gt_py_hi
+        jsr check_solid16
         sta bf_wall             ; 0 = open air, !0 = in wall
-        ldy #0
-?lp     sty bf_eidx
+        ldy #0                  ; X = bf_proj (check_solid16 preserves X) in the loop;
+?lp     sty bf_eidx             ; only the kill path clobbers it and reloads it
         lda en_act,y
         cmp #1
-        beq ?alive
-        jmp ?nx
-?alive  ; Check same hi byte
-        ldx bf_proj
-        lda proj_xh,x
-        cmp enxhi,y
-        beq ?xhi_ok
-        jmp ?nx
-?xhi_ok
-        ; X distance
+        jne ?nx
+        ; X distance: 16-bit |proj_x - en_x|.
+        ; (Was an 8-bit test guarded by "proj_xh == enxhi", so the BFG blast
+        ;  had a dead zone across x=256 - the same bug as the barrel, the
+        ;  pickup radius and melee.)
         lda proj_x,x
         sec
         sbc en_x,y
-        bpl ?xa
-        eor #$FF
-        clc
-        adc #1
-?xa     cmp #BFG_RADIUS
-        bcc ?xok
-        jmp ?nx
-?xok    ; Y distance
-        ldx bf_proj
+        sta abs16.ab_lo
+        lda proj_xh,x
+        sbc enxhi,y
+        jsr abs16               ; preserves X (projectile) and Y (enemy)
+        bcc ?nx
+        cmp #BFG_RADIUS
+        bcs ?nx
+        ; Y distance (16-bit: player proj proj_y_hi vs enemy en_y_hi); X = bf_proj
         lda proj_y,x
         sec
         sbc en_y,y
-        bpl ?ya
-        eor #$FF
-        clc
-        adc #1
-?ya     cmp #BFG_RADIUS
-        bcc ?yok
-        jmp ?nx
-?yok    ; LOS: if proj hit wall, block enemies behind it
+        sta abs16.ab_lo
+        lda proj_y_hi,x
+        sbc en_y_hi,y
+        jsr abs16               ; preserves X (projectile) and Y (enemy)
+        bcc ?nx
+        cmp #BFG_RADIUS
+        bcs ?nx
+        ; LOS: if proj hit wall, block enemies behind it
         lda bf_wall
         beq ?los_ok             ; proj in open air, blast always hits
-        ldx bf_proj
-        lda proj_vx,x
+        lda proj_vx,x           ; X = bf_proj
         bmi ?chk_left
         ; Proj going right: only hit enemies LEFT of proj (near side)
         lda en_x,y
         cmp proj_x,x
-        bcs ?los_blocked        ; enemy X >= proj X = behind wall
-        jmp ?los_ok
+        jcs ?nx                 ; enemy X >= proj X = behind wall
+        bcc ?los_ok             ; C=0 known
 ?chk_left
         ; Proj going left: only hit enemies RIGHT of proj (near side)
         lda proj_x,x
         cmp en_x,y
-        bcs ?los_blocked        ; proj X >= enemy X = behind wall
-?los_ok ldy bf_eidx
+        jcs ?nx                 ; proj X >= enemy X = behind wall
+?los_ok ; Y = bf_eidx on every path here (abs16 preserves Y)
         ; Hit! Apply BFG damage
         lda en_hp,y
         sec
@@ -315,96 +276,164 @@ BFG_BLAST_DMG = 20
         ; Killed
         lda #2
         sta en_act,y
-        lda #20
-        sta en_dtimer,y
         lda #0
         sta en_gib,y
         sta envelx,y
-        sty bf_eidx
-        tya
+        lda #1                  ; falls until move_corpse lands it
+        sta envely,y
+        tya                    ; (bf_eidx already = Y)
         tax
         jsr play_enemy_death
         ldy bf_eidx
-        jmp ?nx
-?los_blocked
-        ldy bf_eidx
-?nx     ldy bf_eidx
+        ldx bf_proj             ; restore the loop's X = projectile
+?nx     ; Y = bf_eidx on every path here
         iny
-        cpy #MAX_ENEMIES
-        beq ?done
-        jmp ?lp
-?done
-        ldx bf_proj
-        rts
+        cpy num_en          ; only slots 0..num_en-1 can ever be active
+        jcc ?lp
+        rts                 ; X = bf_proj (both callers load X next anyway)
 bf_proj dta 0
 bf_eidx dta 0
 bf_wall dta 0
 .endp
 
+rs_proj dta 0                   ; rocket_splash_player's X (its callers reload it)
+
 ; ============================================
 ; ROCKET SPLASH DAMAGE + KNOCKBACK TO PLAYER
-; Input: X = projectile index
+; Input: X = projectile index. Clobbers X (falls into rocket_splash_enemies).
 ; ============================================
 .proc rocket_splash_player
-        stx rs_proj
         lda proj_spr,x
         cmp #SPR_ROCKET_PROJ
-        bne ?ret
+        bne rocket_splash_enemies.done
+        stx rs_proj
+        lda proj_x,x            ; blast centre = the rocket
+        sta spl_x
         lda proj_xh,x
-        cmp zpx_hi
-        bne ?ret
-        lda proj_x,x
-        sec
-        sbc zpx
-        bpl ?xa
-        eor #$FF
-        clc
-        adc #1
-?xa     cmp #ROCKET_SPLASH_RADIUS
-        bcs ?ret
-        sta rs_dist
-        ldx rs_proj
+        sta spl_xhi
         lda proj_y,x
-        sec
-        sbc zpy
-        bpl ?ya
-        eor #$FF
-        clc
-        adc #1
-?ya     cmp #ROCKET_SPLASH_RADIUS
-        bcs ?ret
-        cmp rs_dist
-        bcs ?dok
-        lda rs_dist
-?dok    asl
-        sta rs_dist
+        sta spl_y
+        lda proj_y_hi,x
+        sta spl_yhi
+        lda #ROCKET_SPLASH_RADIUS
+        sta spl_radius
         lda #ROCKET_SPLASH_MAX
-        sec
-        sbc rs_dist
-        bcc ?pmin
+        sta spl_max
+        lda #ROCKET_SPLASH_SCALE
+        sta spl_scale
+        lda #BARREL_KB_X        ; rockets throw as hard as barrels do
+        sta spl_kbx
+        lda #ROCKET_KB_Y
+        sta spl_kby
+        lda #0                  ; no LOS test: a rocket detonates ON the wall
+        sta spl_los             ; it hit, which would block its own splash
+        jsr explosion_splash_player
+        ert *<>rocket_splash_enemies    ; falls through
+.endp
+
+; ============================================
+; ROCKET_SPLASH_ENEMIES - g_Weapon_Explode (radius 60 = 30 px here): every
+; live monster with its rect centre mm = max(|dx|, |dy|) < 30 px from the
+; blast (spl_x/spl_y) takes (Rect.Width/4)*10*(60-2mm)/60 = mon_hw*(30-mm)/3
+; ============================================
+RS_RAD  = 30
+.proc rocket_splash_enemies
+        ldx #0
+?lp     cpx num_en
+        bcc ?one
+done    rts
+?one    lda en_act,x
         cmp #1
-        bcs ?apply
-?pmin   lda #1
-?apply  sta rs_dist
-        lda rs_dist
-        jsr player_take_damage
-        ; --- Horizontal knockback: push player away from explosion ---
-        ldx rs_proj
-        lda zpx
-        cmp proj_x,x
-        bcs ?kb_r
-        ; Player left of explosion → push left
-        lda #0
+        jne ?nx
+        ldy en_type,x
+        lda en_x,x              ; dx = en_x + 8 - spl_x
+        clc
+        adc #8
+        sta ?t
+        lda enxhi,x
+        adc #0
+        sta ?t+1
+        lda ?t
         sec
-        sbc #BARREL_KB_X        ; use barrel KB strength (stronger)
-        sta zpvx
-        jmp ?ret
-?kb_r   ; Player right → push right
-        lda #BARREL_KB_X
-        sta zpvx
-?ret    rts
-rs_proj dta 0
-rs_dist dta 0
+        sbc spl_x
+        sta abs16.ab_lo
+        lda ?t+1
+        sbc spl_xhi
+        jsr abs16               ; C=0: >= 256 (keeps X, Y)
+        jcc ?nx
+        cmp #RS_RAD
+        jcs ?nx
+        sta ?mm
+        lda mon_h,y             ; dy = en_y - h/2 - spl_y
+        lsr
+        sta ?t
+        lda en_y,x
+        sec
+        sbc ?t
+        sta ?t
+        lda en_y_hi,x
+        sbc #0
+        sta ?t+1
+        lda ?t
+        sec
+        sbc spl_y
+        sta abs16.ab_lo
+        lda ?t+1
+        sbc spl_yhi
+        jsr abs16
+        bcc ?nx
+        cmp #RS_RAD
+        bcs ?nx
+        cmp ?mm
+        bcc ?m
+        sta ?mm                 ; mm = the larger one
+?m      lda #RS_RAD             ; dmg = hw * (30 - mm) / 3
+        sec
+        sbc ?mm
+        sta ?f
+        lda mon_hw,y
+        tay
+        lda #0                  ; p = hw * f: lo in A, hi in ?ph
+        sta ?ph
+?mul    clc
+        adc ?f
+        bcc ?mn
+        inc ?ph
+?mn     dey
+        bne ?mul
+        ldy #0                  ; Y = p / 3 by subtraction (p <= 15*30: ?ph <= 1)
+?div    sec
+        sbc #3
+        bcs ?nb
+        dec ?ph                 ; the borrow: 0 -> $FF is below 0
+        bmi ?dq                 ; below 0: Y is the quotient
+?nb     iny
+        bne ?div                ; (always: Y <= 150)
+?dq     tya
+        beq ?nx
+        sta ?d
+        lda en_hp,x
+        sec
+        sbc ?d
+        bcc ?kill
+        beq ?kill
+        sta en_hp,x
+        lda ?d
+        jsr en_hurt             ; pain / wake-up (keeps X, Y)
+        jmp ?nx
+?kill   lda #0
+        sta en_hp,x
+        jsr start_enemy_death   ; keeps X
+        stx ?x+1
+        jsr play_enemy_death    ; (clobbers X)
+?x      ldx #0                  ; (patched)
+?nx     inx
+        jmp ?lp
+?t      dta 0,0
+?mm     dta 0
+?f      dta 0
+?ph     dta 0
+?d      dta 0
 .endp
 
 ; ============================================
@@ -414,24 +443,26 @@ rs_dist dta 0
 ; ============================================
 .proc player_take_damage
         sta ptd_dmg
+        lda zphp                ; dead: nothing hits him any more (D2DF: only
+        beq ?god                ; an alive player is hit)
+        jsr bl_pl               ; the blood (blood.asm; keeps X, Y)
+        lda pl_god              ; god mode (G key): the hit draws blood only
+        bne ?god
         lda zparmor
         beq ?no_armor
         ; armor_hit = damage * 3/4
         lda ptd_dmg
         lsr
         lsr                     ; damage/4 (HP portion)
-        beq ?min_hp
-        jmp ?calc
-?min_hp lda #1                  ; minimum 1 HP damage
+        bne ?calc
+        lda #1                  ; minimum 1 HP damage
 ?calc   sta ptd_hp
-        lda ptd_dmg
+        clc                     ; ~hit = hp - damage - 1 (hit = damage - damage/4)
+        sbc ptd_dmg
+        ; Reduce armor: zparmor + ~hit + 1 = zparmor - hit, C = (zparmor >= hit)
+        ; exactly as sec / sbc hit gave it
         sec
-        sbc ptd_hp              ; armor_hit = damage - damage/4
-        sta ptd_arm
-        ; Reduce armor
-        lda zparmor
-        sec
-        sbc ptd_arm
+        adc zparmor
         bcs ?ar_ok
         lda #0
 ?ar_ok  sta zparmor
@@ -441,7 +472,7 @@ rs_dist dta 0
         sbc ptd_hp
         bcs ?hp_ok
         lda #0
-        jmp ?hp_ok
+        beq ?hp_ok              ; Z=1 from lda #0
 ?no_armor
         ; No armor: full damage to HP
         lda zphp
@@ -452,8 +483,8 @@ rs_dist dta 0
 ?hp_ok  sta zphp
         lda #12                ; pain sprite for 12 frames (~0.2s)
         sta pl_pain_timer
-        rts
+?god    rts
 ptd_dmg dta 0
-ptd_arm dta 0
 ptd_hp  dta 0
 .endp
+pl_god  dta 0                   ; 1: god mode (main.asm G key), no damage

@@ -6,27 +6,30 @@
 ; Keyboard 1-7 to switch
 ;==============================================
 
-CH              = $02FC         ; OS keyboard shadow register ($FF = no key)
-
 ; Weapon property tables (indexed by weapon 0-6)
 ; Key 1 = fist (upgrades to chainsaw when picked up)
+; Damage per shot (g_weapons.pas: g_Weapon_gun 3 a bullet, the shotgun's 10
+; pellets as one shot, punch 3, rocket hit 10 + its blast, plasma 5, BFG 100)
 weap_dmg
-        dta 1                   ; WP_FIST
-        dta 2                   ; WP_PISTOL
-        dta 5                   ; WP_SHOTGUN (DOOM: 7x pistol)
-        dta 1                   ; WP_CHAINGUN (fast fire)
-        dta 10                  ; WP_ROCKET (+splash)
-        dta 2                   ; WP_PLASMA (very fast)
-        dta 20                  ; WP_BFG (one-shots baron)
-
-weap_cooldown
-        dta 12                  ; WP_FIST (6 with chainsaw)
-        dta 15                  ; WP_PISTOL
+        dta 3                   ; WP_FIST
+        dta 3                   ; WP_PISTOL
         dta 30                  ; WP_SHOTGUN
-        dta 4                   ; WP_CHAINGUN
-        dta 35                  ; WP_ROCKET
-        dta 3                   ; WP_PLASMA
-        dta 60                  ; WP_BFG
+        dta 3                   ; WP_CHAINGUN
+        dta 10                  ; WP_ROCKET (+splash)
+        dta 5                   ; WP_PLASMA
+        dta 100                 ; WP_BFG
+        dta 3                   ; WP_SAW (g_Weapon_chainsaw: 3 in single player)
+
+; Frames between shots: WEAPON_RELOAD (g_player.pas, 36 Hz ticks) x 50/36
+weap_cooldown
+        dta 7                   ; WP_FIST (5 ticks)
+        dta 8                   ; WP_PISTOL (6)
+        dta 25                  ; WP_SHOTGUN (18)
+        dta 3                   ; WP_CHAINGUN (2)
+        dta 17                  ; WP_ROCKET (12)
+        dta 3                   ; WP_PLASMA (2)
+        dta 19                  ; WP_BFG (14)
+        dta 3                   ; WP_SAW (2)
 
 ; Ammo type: 0=bullets, 1=shells, 2=rockets, 3=cells, $FF=melee
 weap_ammotype
@@ -37,6 +40,7 @@ weap_ammotype
         dta 2                   ; WP_ROCKET   (rockets)
         dta 3                   ; WP_PLASMA   (cells)
         dta 3                   ; WP_BFG      (cells)
+        dta AMMO_NONE           ; WP_SAW
 
 weap_ammocost
         dta 0                   ; WP_FIST
@@ -46,6 +50,7 @@ weap_ammocost
         dta 1                   ; WP_ROCKET
         dta 1                   ; WP_PLASMA
         dta 40                  ; WP_BFG (DOOM: 40 cells/shot)
+        dta 0                   ; WP_SAW
 
 ; Melee range (0 = projectile weapon)
 weap_range
@@ -56,35 +61,61 @@ weap_range
         dta 0                   ; WP_ROCKET
         dta 0                   ; WP_PLASMA
         dta 0                   ; WP_BFG
+        dta 16                  ; WP_SAW (its 32 px hit rect at half scale)
 
-; Ammo ZP address table (indexed by ammo type 0-3)
-ammo_addr
-        dta zpammo              ; 0 = bullets
-        dta zpshells            ; 1 = shells
-        dta zprockets           ; 2 = rockets
-        dta zpcells             ; 3 = cells
+; Weapon -> its ammo counter (AM_*; $FF = melee, no ammo)
+weap_ammo_ix
+        dta $FF                 ; WP_FIST
+        dta AM_BUL              ; WP_PISTOL
+        dta AM_SHL              ; WP_SHOTGUN
+        dta AM_BUL              ; WP_CHAINGUN
+        dta AM_RKT              ; WP_ROCKET
+        dta AM_CEL              ; WP_PLASMA
+        dta AM_CEL              ; WP_BFG
+        dta $FF                 ; WP_SAW
+
+; The ammo counters (16-bit, D2DF FAmmo): the lo bytes in zero page, the hi
+; bytes and the limits (D2DF AmmoLimits) here; am_hi..pl_caph are one run
+; for the save slot (AM_BYTES)
+AM_BUL  = 0
+AM_SHL  = 1
+AM_RKT  = 2
+AM_CEL  = 3
+am_zp   dta zpammo, zpshells, zprockets, zpcells
+am_hi   dta 0, 0, 0, 0
+pl_capl dta <200, <50, <50, <300
+pl_caph dta >200, >50, >50, >300
+AM_BYTES = *-am_hi
+am_cap0 dta <200, <50, <50, <300, >200, >50, >50, >300  ; no backpack
+am_cap1 dta <400, <100, <100, <600, >400, >100, >100, >600 ; the backpack
+        ert pl_caph<>pl_capl+4
+gca_lo  dta 0                   ; get_cur_ammo: the count
+gca_hi  dta 0
 
 ; Weapon -> projectile sprite (base frame, animates +1)
 weap_proj_spr
         dta 0                   ; WP_FIST (melee, unused)
-        dta 42                  ; WP_PISTOL -> SPR_PROJ1
-        dta 42                  ; WP_SHOTGUN -> SPR_PROJ1
-        dta 42                  ; WP_CHAINGUN -> SPR_PROJ1
-        dta 104                 ; WP_ROCKET -> SPR_ROCKET_PROJ
+        dta SPR_PROJ1           ; WP_PISTOL (hitscan)
+        dta SPR_PROJ1           ; WP_SHOTGUN
+        dta SPR_PROJ1           ; WP_CHAINGUN
+        dta SPR_ROCKET_PROJ     ; WP_ROCKET
         dta SPR_PLASMA_PROJ1    ; WP_PLASMA
         dta SPR_BFG_PROJ1       ; WP_BFG
+        dta 0                   ; WP_SAW (melee, unused)
 
-; Weapon -> pickup sprite index for HUD display
+; Weapon -> HUD icon (the pickup's texture; $FF = none)
 weap_hud_spr
-        dta 0                   ; WP_FIST (no pickup sprite, use 0)
-        dta 47                  ; WP_PISTOL -> SPR_AMMO_CLIP
-        dta 54                  ; WP_SHOTGUN -> SPR_SHOTGUNPK
-        dta 102                 ; WP_CHAINGUN -> SPR_CHAINGUNPK
-        dta 103                 ; WP_ROCKET -> SPR_ROCKETPK
+        dta $FF                 ; WP_FIST
+        dta SPR_PISTOLPK        ; WP_PISTOL
+        dta SPR_SHOTGUNPK       ; WP_SHOTGUN
+        dta SPR_CHAINGUNPK      ; WP_CHAINGUN
+        dta SPR_ROCKETPK        ; WP_ROCKET
         dta SPR_PLASMAGUNPK     ; WP_PLASMA
         dta SPR_BFGPK           ; WP_BFG
+        dta SPR_SAWPK           ; WP_SAW
 
-; Weapon -> sound effect ($FF = no sound yet)
+; Weapon -> sound effect. Every weapon has one: player_update plays it
+; with no "$FF = none" test (the guards below keep it that way).
 weap_sfx
         dta SFX_PUNCH           ; WP_FIST
         dta SFX_PISTOL          ; WP_PISTOL
@@ -93,13 +124,18 @@ weap_sfx
         dta SFX_ROCKET          ; WP_ROCKET
         dta SFX_PLASMA          ; WP_PLASMA
         dta SFX_BFG             ; WP_BFG
+        dta SFX_SAWFUL          ; WP_SAW
+        ert SFX_PUNCH=$FF
+        ert SFX_PISTOL=$FF
+        ert SFX_SHOTGUN=$FF
+        ert SFX_ROCKET=$FF
+        ert SFX_PLASMA=$FF
+        ert SFX_BFG=$FF
 
 ; Keyboard scancode -> weapon mapping
 ; Atari scancodes: 1=$1F, 2=$1E, 3=$1A, 4=$18, 5=$1D, 6=$1B, 7=$33
 key_to_weap_sc
-        dta $1F, $1E, $1A, $18, $1D, $1B, $33
-key_to_weap_id
-        dta 0, 1, 2, 3, 4, 5, 6
+        dta $1F, $1E, $1A, $18, $1D, $1B, $33   ; index = weapon id
 
 ; ============================================
 ; CHECK WEAPON SWITCH (called from read_input)
@@ -109,18 +145,11 @@ key_to_weap_id
         lda CH
         cmp #$FF
         beq ?done               ; no key pressed
-        ; SPACE ($21) = USE key (open doors)
+        ldx #$FF
+        stx CH                  ; acknowledge key (clear for next press); A = scancode
+        ; SPACE ($21) = USE key (TPlayer.Use: PLAYERPRESS triggers)
         cmp #$21
-        bne ?not_space
-        lda #$FF
-        sta CH
-        jsr try_open_door
-        rts
-?not_space
-        sta wk_key              ; save scancode
-        lda #$FF
-        sta CH                  ; acknowledge key (clear for next press)
-        lda wk_key
+        jeq trig_use            ; tail call (it reads no A/X on entry)
         ; Check against weapon keys 1-7
         ldx #6
 ?lp     cmp key_to_weap_sc,x
@@ -128,16 +157,22 @@ key_to_weap_id
         dex
         bpl ?lp
 ?done   rts
-?found  ; X = index, get weapon id
-        lda key_to_weap_id,x
-        tax
-        ; Check if player owns this weapon (bit X in zpweap)
-        lda zpweap
+?found  ; X = key index = weapon id (the old id table was the identity)
+        txa                     ; key 1: the saw if owned and not selected
+        bne ?wk                 ; (D2DF: knuckles and saw share it), else
+        bit zpweap              ; the fist
+        bpl ?wk                 ; N = bit 7: the saw
+        lda zpwcur
+        cmp #WP_SAW
+        beq ?wk                 ; X = 0: back to the fist
+        lda #WP_SAW
+        sta zpwcur
+        rts
+?wk     lda zpweap
         and weap_bitmask,x
         beq ?done               ; don't own it
         stx zpwcur
         rts
-wk_key  dta 0
 .endp
 
 ; ============================================
@@ -146,74 +181,45 @@ wk_key  dta 0
 .proc melee_attack
         ldx zpwcur
         lda weap_dmg,x
-        sta ml_dmg
+        sta hitscan_fire.hs_dmg ; hs_damage_enemy's damage (hitscan sets its own)
         lda weap_range,x
-        sta ml_range
-        ldx #0
-?lp     lda en_act,x
+        sta ml_range+1          ; SMC: range as the cmp # operand
+        ldx #$FF                ; the inx makes it slot 0 (num_en = 0: no slot
+?nx     inx                     ; is active, so skipping slot 0 changes nothing)
+        cpx num_en              ; only slots 0..num_en-1 can ever be active
+        bcs ?done
+        lda en_act,x
         cmp #1
         bne ?nx
-        ; Check same hi byte
-        lda enxhi,x
-        cmp zpx_hi
-        bne ?nx
-        ; Check X distance
+        ; Check X distance: 16-bit |zpx - en_x|.
+        ; (Was an 8-bit test guarded by "enxhi == zpx_hi", so melee simply
+        ;  did not reach across the x=256 page line - same bug as the barrel
+        ;  blast and the pickup radius.)
         lda zpx
         sec
         sbc en_x,x
-        bpl ?xa
-        eor #$FF
-        clc
-        adc #1
-?xa     cmp ml_range
+        sta abs16.ab_lo
+        lda zpx_hi
+        sbc enxhi,x
+        jsr abs16               ; clobbers Y, preserves X
+        bcc ?nx
+ml_range cmp #0                 ; operand patched above
         bcs ?nx
-        ; Check Y distance
+        ; Check Y distance (16-bit |zpy - en_y| < 20)
         lda zpy
         sec
         sbc en_y,x
-        bpl ?ya
-        eor #$FF
-        clc
-        adc #1
-?ya     cmp #20                 ; vertical range
+        sta abs16.ab_lo
+        lda zpy_hi
+        sbc en_y_hi,x
+        jsr abs16
+        bcc ?nx
+        cmp #20                 ; vertical range
         bcs ?nx
-        ; Hit! Apply melee damage
-        lda en_hp,x
-        sec
-        sbc ml_dmg
-        bcs ?hok
-        lda #0
-?hok    sta en_hp,x
-        lda #8
-        sta en_pain_tmr,x
-        ; Alert hit enemy and face player
-        lda #1
-        sta en_cooldown,x
-        lda enxhi,x
-        cmp zpx_hi
-        bcc ?fr
-        bne ?fl
-        lda en_x,x
-        cmp zpx
-        bcc ?fr
-?fl     lda #1
-        sta en_dir,x
-        jmp ?chk
-?fr     lda #0
-        sta en_dir,x
-?chk    lda en_hp,x
-        bne ?alive
-        jsr start_enemy_death
-        jsr play_enemy_death
-?alive  jsr alert_enemies_sound
-        rts
-?nx     inx
-        cpx #MAX_ENEMIES
-        beq ?done
-        jmp ?lp
+        ; Hit! Same damage/pain/face/kill block as the hitscan (hs_dmg set
+        ; above); it returns with the A/flags the old inline copy had here
+        jmp hs_damage_enemy     ; tail call
 ?done   rts
-ml_dmg  dta 0
-ml_range dta 0
 .endp
 
 ; Bitmask table for weapon ownership
@@ -225,110 +231,80 @@ weap_bitmask
         dta $10                 ; bit4 = rocket
         dta $20                 ; bit5 = plasma
         dta $40                 ; bit6 = BFG
+        dta $80                 ; bit7 = chainsaw
 
 ; ============================================
 ; GET CURRENT AMMO COUNT
 ; Returns: A = current ammo for active weapon
 ;          (99 for melee = always can fire)
 ; ============================================
+; Out: X = zpwcur, gca_lo/gca_hi = the count, Z = none left; Y untouched.
 .proc get_cur_ammo
         ldx zpwcur
-        lda weap_ammotype,x
-        cmp #AMMO_NONE
-        beq ?melee
-        cmp #1
-        beq ?shells
-        cmp #2
-        beq ?rockets
-        cmp #3
-        beq ?cells
-        ; ammo type 0 = bullets
-        lda zpammo
+        lda weap_ammo_ix,x
+        bmi ?melee              ; $FF: melee weapon
+        tax
+        lda am_hi,x
+        sta gca_hi
+        lda am_zp,x
+        sta ?rd+1               ; SMC: zp address of the lo byte
+        ldx zpwcur
+?rd     lda zpammo              ; operand patched above
+        sta gca_lo
+        ora gca_hi              ; Z: 16-bit zero
         rts
-?shells lda zpshells
-        rts
-?rockets lda zprockets
-        rts
-?cells  lda zpcells
-        rts
-?melee  lda #99
+?melee  lda #0
+        sta gca_hi
+        lda #99
+        sta gca_lo              ; Z=0
         rts
 .endp
 
 ; ============================================
 ; DEDUCT AMMO for current weapon
 ; ============================================
+; Out: X = zpwcur at entry (callers index with it). A/Y/flags: no caller
+; reads them (both go on to lda weap_sfx,x / jsr spawn_proj; zt2 no longer
+; written - every zt2 reader stores it first).
 .proc deduct_ammo
         ldx zpwcur
-        lda weap_ammotype,x
-        cmp #AMMO_NONE
-        beq ?done               ; melee = no ammo
-        ldy weap_ammocost,x     ; cost to deduct
-        cmp #1
-        beq ?shells
-        cmp #2
-        beq ?rockets
-        cmp #3
-        beq ?cells
-        ; ammo type 0 = bullets
-        tya
-        sta zt2
-        lda zpammo
+        ldy weap_ammo_ix,x
+        bmi ?done               ; melee = no ammo
+        lda am_zp,y
+        sta ?ld+1               ; SMC: zp address of the lo byte
+        sta ?st+1
+        sta ?or+1
+?ld     lda zpammo              ; operand patched above
         sec
-        sbc zt2
-        sta zpammo
-        beq ?auto_switch
-        rts
-?shells tya
-        sta zt2
-        lda zpshells
-        sec
-        sbc zt2
-        sta zpshells
-        beq ?auto_switch
-        rts
-?rockets tya
-        sta zt2
-        lda zprockets
-        sec
-        sbc zt2
-        sta zprockets
-        beq ?auto_switch
-        rts
-?cells  tya
-        sta zt2
-        lda zpcells
-        sec
-        sbc zt2
-        sta zpcells
-        beq ?auto_switch
-        rts
-?auto_switch
-        ; Ammo ran out — find best weapon with ammo
+        sbc weap_ammocost,x
+?st     sta zpammo              ; operand patched above
+        lda am_hi,y             ; the borrow into the hi byte
+        sbc #0
+        sta am_hi,y
+?or     ora zpammo              ; (patched) Z: 16-bit zero
+        bne ?done
+        ; Ammo ran out — find best weapon with ammo (Y = candidate)
         ; Priority: chaingun, shotgun, pistol, fist
+        ldy #WP_CHAINGUN
         lda zpweap
         and #$08                ; chaingun
         beq ?no_cg
         lda zpammo
-        bne ?sw_cg
-?no_cg  lda zpweap
+        ora am_hi+AM_BUL
+        bne ?sw
+?no_cg  ldy #WP_SHOTGUN
+        lda zpweap
         and #$04                ; shotgun
         beq ?no_sg
         lda zpshells
-        bne ?sw_sg
-?no_sg  lda zpammo
-        bne ?sw_pi              ; pistol always owned, check bullets
-        lda #WP_FIST            ; fallback to fist
-        sta zpwcur
-        rts
-?sw_cg  lda #WP_CHAINGUN
-        sta zpwcur
-        rts
-?sw_sg  lda #WP_SHOTGUN
-        sta zpwcur
-        rts
-?sw_pi  lda #WP_PISTOL
-        sta zpwcur
+        ora am_hi+AM_SHL
+        bne ?sw
+?no_sg  ldy #WP_PISTOL
+        lda zpammo
+        ora am_hi+AM_BUL
+        bne ?sw                 ; pistol always owned, check bullets
+        ldy #WP_FIST            ; fallback to fist
+?sw     sty zpwcur
 ?done   rts
 .endp
 

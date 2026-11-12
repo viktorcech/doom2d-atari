@@ -23,6 +23,7 @@ BANK_EN = 0x80
 CHUNK_SIZE = 12288  # 3 banks, max for $6000 upload area
 TARGET_RATE = 3995  # POKEY timer rate (AUDF1=15)
 
+
 # Sound definitions: (game_name, wav_name, sfx_constant, trimmed_name or None)
 SOUNDS = [
     ('pistol',   'DSPISTOL',  'SFX_PISTOL',   '00_pistol_513msb.wav'),
@@ -57,7 +58,72 @@ SOUNDS = [
     ('swtchx',   'DSSWTCHX',  'SFX_SWTCHX',     None),
     ('claw',     'DSCLAW',    'SFX_CLAW',       None),
     ('sgtatk',   'DSSGTATK',  'SFX_SGTATK',     None),
+    ('sklatk',   'DSSKLATK',  'SFX_SKLATK',     None),
+    ('firxpl',   'DSFIRXPL',  'SFX_FIRXPL',     None),
+    ('dmpain',   'DSDMPAIN',  'SFX_DMPAIN',     None),
+    ('sgcock',   'DSSGCOCK',  'SFX_SGCOCK',     None),
+    ('impsit2',  'DSBGSIT2',  'SFX_IMPSIT2',    None),
+    ('podth2',   'DSPODTH2',  'SFX_PODEATH2',   None),
+    ('podth3',   'DSPODTH3',  'SFX_PODEATH3',   None),
+    ('pstop',    'DSPSTOP',   'SFX_PSTOP',      None),
+    ('sawup',    'DSSAWUP',   'SFX_SAWUP',      None),
+    ('sawidl',   'DSSAWIDL',  'SFX_SAWIDL',     None),
+    ('sawful',   'DSSAWFUL',  'SFX_SAWFUL',     None),
+    ('sawhit',   'DSSAWHIT',  'SFX_SAWHIT',     None),
+    ('pauk',     'DSPAUK',    'SFX_PAUK',       None),     # D2DF MAP09 TRIGGER_SOUND
 ]
+# The sounds past $058000 (blood lists there), each region its own upload
+# (uploads.asm upload_snd<x>) from its 4K bank start (generic_upload writes
+# whole banks): (file, bank, first sound, end, sounds)
+EXTRA = [
+    # after the map (BANK_MAP $05A000 + MAP_BYTES), before the sprites
+    # ($05E000): each level load overwrites the zero padding with the map
+    ('snd_x.bin', 0x05D000, 0x05D200, 0x05E000, [
+        ('bulk1',  'BULK1',  'SFX_BULK1',  None),  # g_phys.pas g_Obj_Splash
+        ('bulk2',  'BULK2',  'SFX_BULK2',  None),
+    ]),
+    # the bank prepare_sprites.py REGIONS leaves out of $011000-$013FFF
+    ('snd_y.bin', 0x012000, 0x012000, 0x013000, [
+        ('secret', 'SECRET', 'SFX_SECRET', None),  # g_player.pas GetSecret
+    ]),
+]
+
+
+def built_sounds(base_dir):
+    """The sounds already in data/snd_c*.bin, by SFX constant, from the
+    current source/gen/sound_tables.asm (they stay byte for byte: their
+    trimmed sources are not in the tree)."""
+    tab = os.path.join(base_dir, 'source', 'gen', 'sound_tables.asm')
+    if not os.path.exists(tab):
+        return {}
+    old = b''
+    k = 1
+    while os.path.exists(os.path.join(base_dir, 'data', f'snd_c{k}.bin')):
+        old += open(os.path.join(base_dir, 'data', f'snd_c{k}.bin'), 'rb').read()
+        k += 1
+    old_x = {}                              # region bank -> its file
+    for name, bank, _, end, _ in EXTRA:
+        p = os.path.join(base_dir, 'data', name)
+        old_x[bank, end] = open(p, 'rb').read() if os.path.exists(p) else b''
+    cols, cur = {}, None
+    for line in open(tab):
+        if line[:1].isalpha():
+            cur = cols.setdefault(line.strip(), [])
+        elif cur is not None and 'dta $' in line:
+            cur.append((int(line.split('$')[1][:2], 16), line.split(';')[1].split()[0]))
+    out = {}
+    for (b, c), (lo, _), (hi, _), (be, _), (el, _), (eh, _) in zip(
+            cols['sfx_vbank'], cols['sfx_vptr_lo'], cols['sfx_vptr_hi'],
+            cols['sfx_vbank_end'], cols['sfx_vend_lo'], cols['sfx_vend_hi']):
+        start = (b & 0x3F) * 0x4000 + (hi << 8 | lo) - 0x4000
+        end = (be & 0x3F) * 0x4000 + (eh << 8 | el) - 0x4000
+        for (bank, lim), data in old_x.items():
+            if bank <= start < lim:
+                out[c] = data[start - bank:end - bank]
+                break
+        else:
+            out[c] = old[start - VRAM_BASE:end - VRAM_BASE]
+    return out
 
 
 def wav_to_4bit(wav_path, target_rate=TARGET_RATE):
@@ -123,11 +189,34 @@ def main():
     trimmed_dir = os.path.join(base_dir, 'data', 'sfx_used')
     data_dir = os.path.join(base_dir, 'data')
 
-    # Convert all sounds
+    # Convert all sounds (the ones already built kept as they are)
+    built = built_sounds(base_dir)
     all_data = b''
+    x_data = [b'' for _ in EXTRA]
     entries = []
 
-    for game_name, wav_name, sfx_const, trimmed_name in SOUNDS:
+    def place(r, packed):
+        """The VRAM address of the next sound in region r (None: the main one)."""
+        nonlocal all_data
+        if r is None:
+            start = VRAM_BASE + len(all_data)
+            all_data += packed
+        else:
+            start = EXTRA[r][2] + len(x_data[r])
+            x_data[r] += packed
+        return start
+
+    every = [(s, None) for s in SOUNDS] + [(s, r) for r, e in enumerate(EXTRA) for s in e[4]]
+    for (game_name, wav_name, sfx_const, trimmed_name), r in every:
+        if sfx_const in built:
+            packed = built[sfx_const]
+            start_addr = place(r, packed)
+            end_addr = start_addr + len(packed)
+            dur_ms = len(packed) * 2 * 1000 / TARGET_RATE
+            entries.append((game_name, sfx_const, start_addr, end_addr, len(packed), dur_ms))
+            print(f"  {game_name:12s}: {dur_ms:6.0f}ms -> {len(packed):5d} bytes  "
+                  f"VRAM ${start_addr:06X}-${end_addr:06X}  [built]")
+            continue
         # Prefer trimmed version from sfx_used/
         wav_path = None
         if trimmed_name and os.path.exists(os.path.join(trimmed_dir, trimmed_name)):
@@ -136,14 +225,17 @@ def main():
         else:
             wav_path = os.path.join(wav_dir, wav_name + '.wav')
             src_tag = 'original'
+            for wad in ('Doom2DWAD', os.path.join('GameWAD', 'SOUNDS')):  # D2DF's own
+                if not os.path.exists(wav_path):
+                    wav_path = os.path.join(base_dir, 'git', 'DF-Assets-master', wad,
+                                            wav_name + '.wav')
         if not os.path.exists(wav_path):
             print(f"WARNING: {wav_path} not found, skipping")
             continue
 
         packed = wav_to_4bit(wav_path)
-        start_addr = VRAM_BASE + len(all_data)
+        start_addr = place(r, packed)
         end_addr = start_addr + len(packed)
-        all_data += packed
 
         w = wave.open(wav_path)
         dur_ms = w.getnframes() / w.getframerate() * 1000
@@ -171,8 +263,18 @@ def main():
         chunk_num += 1
         offset += CHUNK_SIZE
 
+    assert VRAM_BASE + len(all_data) <= 0x058000, 'sounds reach the blood lists'
+    for (name, bank, base, end, _), data in zip(EXTRA, x_data):
+        assert base + len(data) <= end, f'{name} runs past ${end:06X}'
+        img = bytes(base - bank) + data
+        img += bytes(-len(img) % 256)       # whole pages: what generic_upload writes
+        with open(os.path.join(data_dir, name), 'wb') as f:
+            f.write(img)
+        print(f"  {name}: {len(img)} bytes = {len(img) // 256} pages at ${bank:06X} "
+              f"(uploads.asm uc_lastpg)")
+
     # Generate ASM include
-    asm_path = os.path.join(data_dir, 'sound_tables.asm')
+    asm_path = os.path.join(base_dir, 'source', 'gen', 'sound_tables.asm')
     with open(asm_path, 'w') as f:
         f.write("; Auto-generated sound VRAM address tables\n")
         f.write(f"; {len(entries)} sounds, {len(all_data)} bytes total\n")

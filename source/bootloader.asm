@@ -7,6 +7,8 @@
         opt h+
         opt o+
 
+        icl 'gen/atr_layout_const.asm'  ; XEX_D7_SEC
+
         org $0700
 
 ; === Boot header (6 bytes, read by OS) ===
@@ -15,18 +17,13 @@
         dta a($0700)            ; load address
         dta a(boot_init)        ; init address (jump here after load)
 
-; === Variables ===
-cur_sec     dta a(4)            ; current sector number (XEX starts at 4)
-buf_pos     dta 128             ; position in buffer (128 = force first read)
-seg_lo      dta 0
-seg_hi      dta 0
-end_lo      dta 0
-end_hi      dta 0
+; The OS calls load address + 6 right after the load: code must start here
+; (boot_init never returns), the variables are past the code.
 
 ; Zero page pointer for indirect store (must be in ZP)
 zp_dest     = $E0              ; 2 bytes: destination pointer (free ZP area)
 
-SECBUF      = $0800             ; 128-byte sector read buffer
+SECBUF      = $0880             ; 128-byte sector read buffer, past the 3 boot sectors
 
 ; === Boot entry point ===
 boot_init
@@ -35,6 +32,16 @@ boot_init
         sta $22F                ; SDMCTL off
         sta $D400               ; DMACTL off
 
+        ; VBXE registers at $D700 (an FX core there): the XEX built for
+        ; that page (build_doom2d.py), else the $D600 one from sector 4
+        lda $D740               ; CORE_TYPE
+        cmp #$10
+        bne ?d6
+        lda #<XEX_D7_SEC
+        sta cur_sec
+        lda #>XEX_D7_SEC
+        sta cur_sec+1
+?d6
         ; Skip $FF $FF XEX header
         jsr get_byte
         jsr get_byte
@@ -153,3 +160,13 @@ read_sec
 ?done   lda #0
         sta buf_pos
         rts
+
+; === Variables ===
+cur_sec     dta a(4)            ; current sector number (XEX starts at 4)
+buf_pos     dta 128             ; position in buffer (128 = force first read)
+seg_lo      dta 0
+seg_hi      dta 0
+end_lo      dta 0
+end_hi      dta 0
+        ert *>SECBUF            ; the 3 boot sectors end below the buffer
+        ert SECBUF+128>$0900    ; $0700-$08FF: the loader's (check_xex.py)

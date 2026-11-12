@@ -3,26 +3,43 @@
 ; constants.asm
 ;==============================================
 
+; --- Build flags ---
+; AUTOPLAY: 1 = debug build - skip the title menu and hold joystick RIGHT
+; (deterministic scroll for emulator regression runs). Ship with 0.
+AUTOPLAY        = 0
+
 ; --- Atari OS ---
 RTCLOK3         = $14
+RANDOM          = $D20A          ; POKEY random byte (read)
 SDMCTL          = $22F
+SDLSTL          = $230           ; OS shadow: display list pointer lo
+SDLSTH          = $231           ; OS shadow: display list pointer hi
+DLISTL          = $D402          ; ANTIC display list pointer (hardware)
+DLISTH          = $D403
+HSCROL          = $D404
+COLOR2          = $2C6           ; OS shadow: playfield 2 (text background)
 COLOR4          = $2C8
+CH              = $02FC          ; OS keyboard shadow ($FF = no key)
 CIOV            = $E456
 PORTA           = $D300
 TRIG0           = $D010
+PAL             = $D014          ; GTIA: PAL/NTSC detect (bits 1-3)
 AUDF1           = $D200
 AUDC1           = $D201
 AUDF2           = $D202
 AUDC2           = $D203
+AUDC3           = $D205
 AUDC4           = $D207
 AUDCTL          = $D208
 STIMER          = $D209
 IRQEN           = $D20E
+IRQST           = $D20E          ; read: IRQ status (0 = pending)
 SKCTL           = $D20F
 VCOUNT          = $D40B
 
 ; --- OS vectors/shadow ---
 POKMSK          = $0010
+VIMIRQ          = $0216          ; immediate IRQ vector (Timer 1 chain)
 VTIMR1          = $0210
 
 ; --- Sound ---
@@ -66,39 +83,35 @@ SFX_IMPSIT2    = 36
 SFX_PODEATH2   = 37
 SFX_PODEATH3   = 38
 SFX_PSTOP      = 39
+SFX_SAWUP      = 40            ; DOOM.WAD DSSAW*: the chainsaw
+SFX_SAWIDL     = 41
+SFX_SAWFUL     = 42
+SFX_SAWHIT     = 43
+SFX_PAUK       = 44            ; D2DF DSPAUK (MAP09 TRIGGER_SOUND)
+SFX_BULK1      = 45            ; D2DF GameWAD BULK1/2: a splash (VRAM $05D200, snd_x)
+SFX_BULK2      = 46
+SFX_SECRET     = 47            ; D2DF GameWAD SECRET: a secret found (VRAM $012000, snd_y)
+SAW_LOCK       = 16            ; frames the saw sound plays before a retrigger
 
-TILE_SWITCH_OFF = 28
-TILE_SWITCH_ON  = 29
-TILE_EXIT_SW_OFF = 30
-TILE_EXIT_SW_ON  = 31
-TILE_SOLIDFLR    = 43
-
-; --- Switch target system ---
-MAX_SWITCHES    = 4
-SW_ACT_DOOR     = 0             ; switch opens door (spacebar locked)
-SW_ACT_WALL     = 1             ; remove wall (hidden area)
-SW_ACT_ELEV     = 2             ; call elevator (future)
-SW_ACT_DOOR_LOCK = 3            ; pickup opens door (spacebar locked)
-SW_ACT_FLOOR    = 4             ; floor trigger opens door (step on tile)
-SW_ACT_EXIT     = 5             ; exit switch — advance to next level
-SW_ACT_TRAP     = 6             ; remove wall + wake sleeping enemies nearby
-
-; --- VBXE registers ---
-VBXE_VCTL       = $D640
-VBXE_XDL0       = $D641
-VBXE_XDL1       = $D642
-VBXE_XDL2       = $D643
-VBXE_CSEL       = $D644
-VBXE_PSEL       = $D645
-VBXE_CR         = $D646
-VBXE_CG         = $D647
-VBXE_CB         = $D648
-VBXE_BL_ADR0    = $D650
-VBXE_BL_ADR1    = $D651
-VBXE_BL_ADR2    = $D652
-VBXE_BLITTER    = $D653
-VBXE_MEMAC_CTRL = $D65E
-VBXE_BANK_SEL   = $D65F
+; --- VBXE registers: page $D6 or $D7 (build_doom2d.py -d:VBXE_PAGE, one
+; XEX each; the boot loader picks by $D740) ---
+VBXE_REG        = VBXE_PAGE<<8
+VBXE_VCTL       = VBXE_REG+$40  ; read: CORE_TYPE ($10 = FX)
+VBXE_XDL0       = VBXE_REG+$41  ; read: CORE_REVISION
+VBXE_XDL1       = VBXE_REG+$42
+VBXE_XDL2       = VBXE_REG+$43
+VBXE_CSEL       = VBXE_REG+$44
+VBXE_PSEL       = VBXE_REG+$45
+VBXE_CR         = VBXE_REG+$46
+VBXE_CG         = VBXE_REG+$47
+VBXE_CB         = VBXE_REG+$48
+VBXE_BL_ADR0    = VBXE_REG+$50
+VBXE_BL_ADR1    = VBXE_REG+$51
+VBXE_BL_ADR2    = VBXE_REG+$52
+VBXE_BLITTER    = VBXE_REG+$53
+VBXE_MEMAC_B    = VBXE_REG+$5D
+VBXE_MEMAC_CTRL = VBXE_REG+$5E
+VBXE_BANK_SEL   = VBXE_REG+$5F
 
 ; --- VBXE constants ---
 VC_XDL_ON       = $01
@@ -109,9 +122,9 @@ BLT_TRANS       = $01
 
 ; --- VRAM layout (double buffered) ---
 ; Screen 0: $000000 (64000 bytes)
-; Tiles:    $010000 (bank $10, 4KB)
-; Sprites:  $011000 (banks $11-$12, 7KB)
+; Sprites:  $011000 (banks $11-$1C)
 ; Screen 1: $020000 (64000 bytes)
+; Map:      $05A000 (BANK_MAP), level tiles: $074000 (VRAM_TILESET)
 ; XDL:      $07F000 (bank $7F)
 ; BCB:      $07F100 (bank $7F)
 SCR1_HI         = $02           ; Screen 1 high byte for buffer swap
@@ -120,18 +133,14 @@ VRAM_XDL        = $07F000
 VRAM_BCB        = $07F100
 
 ; Explicit MEMAC-A bank numbers
-BANK_TILES      = $10           ; VRAM $010000
-BANK_SPR0       = $11           ; VRAM $011000 (first 4KB of sprites)
-BANK_SPR1       = $12           ; VRAM $012000 (remaining sprites)
 BANK_HUD        = $1D           ; VRAM $01D000 (HUD font, 768 bytes)
-BANK_MAP        = $1E           ; VRAM $01E000 (map data, 2048 bytes)
-BANK_BG         = $34           ; VRAM $034000 (background sky image, 320x200)
+VRAM_TILESET    = $074000       ; 256 map tiles x 64 B (TW x TH), $074000-$077FFF
+BANK_MAP        = $5A          ; VRAM $05A000-$05D1FF: map, MAP_RPB rows per bank
 
-; MEMAC-B ($D65D): 16KB window at $4000-$7FFF for sound data
+; MEMAC-B (VBXE_MEMAC_B): 16KB window at $4000-$7FFF for sound data
 ; Sound VRAM starts at $044000 = MEMAC-B bank 4 (each bank = 16KB)
 ; Control byte: $C0 = enable+CPU, + bank number
-VBXE_MEMAC_B    = $D65D
-MEMB            = $4000         ; MEMAC-B window base
+MEMB          = $4000         ; MEMAC-B window base
 MEMB_SND_BANK0  = $C4           ; first sound bank ($C0 enable + bank 4 = VRAM $040000)
 BANK_XDL        = $7F           ; VRAM $07F000
 BANK_BCB        = $7F           ; VRAM $07F100
@@ -144,22 +153,51 @@ SCR_W           = 320
 SCR_H           = 200
 
 ; --- Tiles/map ---
-TW              = 16
-TH              = 16
-MAP_W           = 32
-MAP_H           = 32
-TILES_X         = 20
-TILES_Y         = 12
+; One map cell = 16 px of the original Doom 2D map, drawn at half scale
+; (the 320 px screen shows the original's 640 px view): TW x TH screen px.
+TW              = 8
+TH              = 8
+MAP_W           = 100
+MAP_H           = 100           ; full map height (matches editor + map2bin)
+PL_XMAX         = MAP_W*TW-16   ; rightmost player X (16-bit, sprite 16 wide)
+MAP_STRIDE      = 128          ; VRAM bytes per map row: a row never crosses a page
+MAP_RPB         = 32            ; map rows per 4K VRAM bank (32*128 = 4096 B)
+MAP_BYTES       = MAP_H*MAP_STRIDE ; VRAM/disk image of the map (12800 B = 100 sectors)
+        ert MAP_W>MAP_STRIDE
+TILES_X         = SCR_W/TW      ; 40 cells across the screen
+TILES_Y         = GAME_H/TH     ; 24 cells down the game area
+
+; --- Scroll camera ---
+GAME_H          = 192           ; visible game area height (= HUD_Y)
+MAX_CAM_X       = MAP_W*TW-SCR_W
+
+SR_MAX          = 28             ; the world sprites' screen rects of a frame (vbxe.asm)
+sr_x0           = $B690          ; x/2
+sr_x1           = sr_x0+SR_MAX   ; ceil((x+w)/2)
+sr_y0           = sr_x1+SR_MAX   ; y
+sr_y1           = sr_y0+SR_MAX   ; y+h
+FORE_RAM        = $B700          ; foreground rects of the level (fore.asm)
+        ert sr_y1+SR_MAX>FORE_RAM
 
 ; --- Game ---
-PL_MAXSPD       = 2             ; max horizontal speed (px/frame)
-GRAV            = 1
-JUMPF           = 8
-MAXFALL         = 3
-COYOTE          = 3             ; coyote time (frames after leaving edge)
+; Player physics = Doom 2D Forever (g_player.pas / g_phys.pas, 36 ticks/s,
+; gravity +1 every 2nd tick, VEL_JUMP 10, MAX_RUNVEL 8, run accel 1/tick)
+; at half scale and 50 frames/s (x 0.72 per frame), 8.8 fixed point:
+PL_GRAV         = $21           ; 0.13 px/frame^2  (0.5/2 x 0.72^2)
+PL_JUMPV        = $0399         ; 3.6 px/frame     (10/2 x 0.72) -> 50 px jump
+PL_LIFTV        = $01CD         ; 1.8 px/frame     (5/2 x 0.72): lift speed
+PL_VMAX         = $02E1         ; 2.88 px/frame    (8/2 x 0.72)
+PL_ACC          = $42           ; 0.26 px/frame^2  (1/2 x 0.72^2), also braking
+PL_MAXFALL      = TH-1          ; whole px/frame: below a cell, no floor skipped
+PL_MAXV         = $0ACD         ; 10.8 px/frame    (30/2 x 0.72): D2DF MAX_YV, the
+        ert PL_MAXV>=2*TH*256   ; player's/monsters' fall (2 floor probes)
+PL_SWV          = $0170         ; 1.44 px/frame    (4/2 x 0.72): D2DF VEL_SW, the
+                                ; swim-up speed and the liquid's speed limit
+ACID_TICKS      = 21            ; 15 D2DF ticks (x 50/36): acid hit interval
+EN_MAXFALL      = 3             ; enemies (not ported yet)
 MAX_PROJ        = 4
-MAX_ENEMIES     = 50
-MAX_PICKUPS     = 12
+MAX_ENEMIES     = 66            ; MAP07 and MAP12 (with the fish) have 66
+MAX_PICKUPS     = 96
 
 ; --- Pickup types ---
 PK_HEALTH       = 0
@@ -183,47 +221,47 @@ PK_BFG          = 17
 PK_ROCKET1      = 18
 PK_HEALTHBONUS  = 19
 PK_ARMORBONUS   = 20
-NUM_PK_TYPES    = 21
+PK_SAW          = 21            ; chainsaw (D2DF ITEM_WEAPON_SAW)
+PK_OXYGEN       = 22            ; D2DF ITEM_OXYGEN
+PK_BACKPACK     = 23            ; D2DF ITEM_AMMO_BACKPACK
+AIR_DEF         = 360           ; D2DF air at spawn / on surfacing (ticks)
+AIR_MAX         = 1091          ; D2DF air after an oxygen tank
 
 ; --- Decoration ---
 MAX_DECOR       = 16
-DC_BARREL       = 0
-DC_TORCH        = 1
-DC_PILLAR       = 2
-DC_LAMP         = 3
-DC_DEADGUY      = 4
-DC_TECHTHING    = 5
-DC_EVILEYE      = 6             ; evil eye symbol (CEYEA0)
-DC_SKULPILLAR   = 7             ; red pillar with skull (SMITA0)
-DC_ELECLAMP     = 8             ; tall tech lamp (ELECA0)
-DC_DEADTREE     = 9             ; dead tree (TRE1A0)
-DC_BROWNTREE    = 10            ; brown tree (TRE2A0)
-DC_HANGBODY     = 11            ; hanging body (GOR2A0)
-DC_HANGLEG      = 12            ; hanging leg (GOR3A0)
-DC_IMPALED      = 13            ; impaled human (POL1A0)
-DC_SKULLPILE    = 14            ; pile of skulls (POL4A0)
-DC_REDTORCH     = 15            ; short red torch, animated (TREDA0-D0)
-NUM_DC_TYPES    = 16
 
 ; Barrel
 BARREL_HP       = 3             ; hits to explode
-BARREL_DMG      = 20            ; explosion damage to enemies (fixed)
+BARREL_DMG      = 40            ; damage to enemies at point blank; falls off
+                                ; linearly (dmg = BARREL_DMG - dist), like
+                                ; DOOM's P_RadiusAttack. 9 dmg at the edge.
 BARREL_RADIUS   = 32            ; explosion radius (pixels)
 BARREL_PLR_MAX  = 100           ; max barrel damage to player (point blank)
 BARREL_PLR_SCALE = 3            ; damage reduction per pixel distance (100-32*3=4 at edge)
 BARREL_KB_X     = 6             ; barrel knockback horizontal (stronger than rocket)
-BARREL_KB_Y     = 8             ; barrel knockback vertical
+BARREL_KB_Y     = 8             ; barrel knockback vertical (the barrel jump)
+
+; Barrel explosion timeline (dc_timer counts DOWN from BARREL_EXP_TIME to 0)
+BARREL_EXP_TIME  = 31           ; set by barrel_ignite
+BARREL_EXP_CHAIN = 30           ; clear solid tile + sound + ignite neighbours
+BARREL_EXP_F2    = 21           ; >= : flash sprite, below: fire sprite
+BARREL_EXP_DMG   = 20           ; apply radius damage (~0.2s after the flash)
+BARREL_EXP_F3    = 11           ; >= : fire sprite, below: smoke + blink
+EXPL_IFRAME      = 10           ; frames of explosion-damage immunity for the player
+                                ; (stops a barrel chain stacking full splash hits)
 
 ; Rocket splash
 ROCKET_SPLASH_RADIUS = 32       ; splash radius (pixels)
 ROCKET_SPLASH_MAX    = 50       ; max self-damage (point blank)
 ROCKET_SPLASH_SCALE  = 2        ; damage reduction per pixel distance
-ROCKET_KB_X          = 3        ; horizontal knockback velocity
 ROCKET_KB_Y          = 6        ; upward knockback velocity
 
 ; --- Player ---
 PL_W            = 10            ; player collision width
 PL_H            = 28            ; player collision height
+PL_RL           = 3             ; D2DF PLAYER_RECT (34x52 at half scale, 17x26):
+PL_RR           = 13            ; [zpx-PL_RL, zpx+PL_RR] x [zpy-PL_RH, zpy-1]
+PL_RH           = 26
 
 ; --- Weapons ---
 WP_FIST         = 0             ; key 1 (fist/chainsaw share slot)
@@ -233,7 +271,7 @@ WP_CHAINGUN     = 3             ; key 4
 WP_ROCKET       = 4             ; key 5
 WP_PLASMA       = 5             ; key 6
 WP_BFG          = 6             ; key 7
-NUM_WEAPONS     = 7
+WP_SAW          = 7             ; key 1 too (D2DF: knuckles and saw share it)
 AMMO_NONE       = $FF           ; melee weapons
 
 ; --- HUD ---

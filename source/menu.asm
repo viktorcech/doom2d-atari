@@ -11,7 +11,6 @@ txt_ptr = $84               ; 2b pointer for text rendering
 ; ============================================
 ; CONSTANTS & STATE
 ; ============================================
-MENU_BKP_VRAM = $070000
 MENU_X      = 112
 MENU_Y      = 80
 MENU_SPACE  = 16
@@ -19,37 +18,35 @@ MENU_ITEMS  = 5
 
 menu_sel    dta 0
 menu_prev   dta 0
-menu_vc_tmp dta 0               ; 2026-04-08: RTCLOK3 snapshot for vsync wait (snd_poll clobbers A)
 draw_mode   dta 0           ; 0=draw_menu, 1=draw_settings
 menu_result dta 0           ; 0=new game, 2=load game, $FF=ESC
 menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
 
 ; ============================================
-; OPEN MENU — init state, backup screen, draw
+; CLOSE MENU — restore screen on both buffers (title menu only: in pause
+; mode the next composite_frame wipes the menu area anyway)
 ; ============================================
-.proc menu_open
-        lda #0
-        sta menu_sel
-        sta menu_prev
-        sta draw_mode
-        jsr backup_menu_area
-        jsr redraw_both
-        rts
+.proc menu_close
+        jsr both_bufs           ; the rest runs once per buffer
+        jmp restore_menu_area
 .endp
 
 ; ============================================
-; CLOSE MENU — restore screen on both buffers
+; MENU_VSYNC - wait for the next frame (RTCLOK3 change); keeps X and Y
 ; ============================================
-.proc menu_close
-        jsr restore_menu_area
-        lda zbuf_hi
-        eor #SCR1_HI
-        sta zbuf_hi
-        jsr restore_menu_area
-        lda zbuf_hi
-        eor #SCR1_HI
-        sta zbuf_hi
+.proc menu_vsync
+        lda RTCLOK3
+?w      cmp RTCLOK3
+        beq ?w
         rts
+.endp
+
+; MENU_ESC_SND - ESC taken: clear the key, play the back sound
+.proc menu_esc_snd
+        lda #$FF
+        sta CH
+        ldx #SFX_SWTCHX
+        jmp snd_play
 .endp
 
 ; ============================================
@@ -58,6 +55,11 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
 ; menu_result: 0=new game, 2=load
 ; ============================================
 .proc menu_title_screen
+.if AUTOPLAY=1
+        lda #0
+        sta menu_result         ; debug: skip straight to NEW GAME
+        rts
+.endif
 ?wait_release
         lda PORTA
         eor #$FF
@@ -66,48 +68,31 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         lda TRIG0
         beq ?wait_release
         lda #$FF
-        sta $02FC
-        ldx #10
-?dly    lda RTCLOK3
-?dly2   cmp RTCLOK3
-        beq ?dly2
+        sta CH
+        ldx #4                  ; debounce ~4 frames (was 10 - felt sluggish)
+?dly    jsr menu_vsync          ; keeps X
         dex
         bne ?dly
         lda #$FF
-        sta $02FC
+        sta CH
 ?wait_key
-        ; 2026-04-08: VBLANK wait + deferred VRAM reads
-        lda RTCLOK3
-        sta menu_vc_tmp
-?wk_vs  jsr snd_poll
-        lda RTCLOK3
-        cmp menu_vc_tmp
-        beq ?wk_vs
-        lda $02FC
+        jsr menu_vsync          ; VBLANK wait
+        lda CH
         cmp #$FF
-        beq ?chk_joy
-        jmp ?got_input
-?chk_joy
+        bne ?got_input
         lda PORTA
         eor #$FF
         and #$0F
         bne ?got_input
         lda TRIG0
-        beq ?got_input
-        jmp ?wait_key
+        bne ?wait_key           ; no fire: keep waiting
 ?got_input
         lda #$FF
-        sta $02FC
+        sta CH
         lda #0
         sta menu_mode           ; title mode (no SAVE)
-        ldx #SFX_SWTCHN
-        jsr snd_play
-        jsr menu_open
-
-        jsr menu_common_loop
-        lda menu_result
-        cmp #$FF
-        bne ?done
+        jsr menu_open           ; A = menu_result: N=1 only for $FF (ESC)
+        bpl ?done
         ; ESC on title: close menu, go back to wait
         jsr menu_close
         jmp ?wait_release
@@ -115,39 +100,47 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
 .endp
 
 ; ============================================
-; PAUSE MENU (called from game loop)
-; Returns: A = 0 resume, 1 new game, 2 load game
+; PAUSE MENU (called from game loop), falls into menu_open
+; Returns: A = menu_result: $FF resume (N=1), 0 new game (Z=1), 2 load game
+; (resume needs no menu_close: pause mode restores nothing)
 ; ============================================
 .proc menu_pause
+        jsr wait_blit           ; the last frame's list may still run (frame.asm)
+        jsr sio_quiet           ; silence, the sample IRQ off
         lda #0
-        sta snd_active
         sta snd_lock
-        sta AUDC4
         lda #1
         sta menu_mode           ; pause mode (has SAVE)
+.endp
+        ert *<>menu_open
+
+; ============================================
+; OPEN MENU — open sound, init state, backup screen, draw, then the menu
+; loop (falls into menu_common_loop): exit A = menu_result, N/Z from it.
+; Pause mode skips the backup: the game loop recomposites rows 0-191 every
+; frame, so the menu area self-heals on resume. Title mode must back up
+; (the title image is static, nothing redraws it).
+; Skipping the backup also keeps VRAM $070000 (overlaps the bg canvas rows)
+; untouched -> no forced full canvas rebuild on resume.
+; ============================================
+.proc menu_open
         ldx #SFX_SWTCHN
         jsr snd_play
-        jsr menu_open
-
-        jsr menu_common_loop
-        lda menu_result
-        cmp #$FF
-        beq ?resume
-        cmp #0
-        beq ?new_game
-        rts                     ; A=2 load game
-?new_game
-        lda #1
-        rts
-?resume
-        jsr menu_close
         lda #0
-        rts
+        sta menu_sel
+        sta menu_prev
+        sta draw_mode
+        lda menu_mode
+        bne ?no_bkp             ; pause: no backup needed
+        jsr backup_menu_area
+?no_bkp jsr redraw_both
+        ert *<>menu_common_loop
 .endp
 
 ; ============================================
 ; COMMON MENU LOOP — shared input/selection handling
-; Sets menu_result: 0=new game, 2=load, $FF=ESC
+; Sets menu_result: 0=new game, 2=load, $FF=ESC; exits with A = menu_result
+; and N/Z from it ($FF: N=1; 0: Z=1; 2: N=Z=0) - menu_open's callers use it.
 ; ============================================
 .proc menu_common_loop
         ; Debounce: wait for fire button release before accepting input
@@ -160,107 +153,65 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         beq ?no_redraw
         ldx #SFX_PSTOP
         jsr snd_play
-        jsr redraw_both
+        jsr move_cursor         ; cursor-only redraw (4 tiny blits, not ~74)
         lda menu_sel
         sta menu_prev
 ?no_redraw
-        ; 2026-04-08: VBLANK wait + deferred VRAM reads
-        lda RTCLOK3
-        sta menu_vc_tmp
-?vs     jsr snd_poll
-        lda RTCLOK3
-        cmp menu_vc_tmp
-        beq ?vs
+        jsr menu_vsync          ; VBLANK wait
 
         ; ESC
-        lda $02FC
+        lda CH
         cmp #$1C
         bne ?no_esc
-        lda #$FF
-        sta $02FC
-        ldx #SFX_SWTCHX
-        jsr snd_play
+        jsr menu_esc_snd
         lda #$FF
         sta menu_result
-        rts
+        rts                     ; A=$FF: N=1
 ?no_esc
-        ; RETURN
+        ; RETURN (?handle_sel clears CH)
         cmp #$0C
-        bne ?chk_fire
-        lda #$FF
-        sta $02FC
-        jmp ?handle_sel
-?chk_fire
+        beq ?handle_sel
         lda TRIG0
-        bne ?no_fire            ; fire not pressed, loop
+        jne ?loop               ; fire not pressed, loop
         ; Fire pressed — wait for release first (debounce)
 ?fr_rel lda TRIG0
         beq ?fr_rel
-        jmp ?handle_sel
-?no_fire
-        jmp ?loop
 
 ?handle_sel
         lda #$FF
-        sta $02FC
+        sta CH
         ldx #SFX_PISTOL
         jsr snd_play
 
         lda menu_sel
         ; 0 = NEW GAME
-        cmp #0
         bne ?not_ng
         sta menu_result
-        rts
+        rts                     ; A=0: Z=1, N=0
 ?not_ng
-        ; 1 = SETTINGS
-        cmp #1
-        bne ?not_set
-        jsr menu_settings
-        jsr redraw_both
-        jmp ?loop
-?not_set
-        ; 2 = SAVE (pause) or LOAD (title)
+        ; title has no SAVE: map its sel 1,2,3 to the pause numbering 1,3,4
+        ldx menu_mode
+        bne ?pause
         cmp #2
-        bne ?not_2
-        lda menu_mode
-        beq ?title_load         ; title mode: sel 2 = LOAD
-        ; Pause: sel 2 = SAVE
-        jsr save_game_menu
-        jsr redraw_both
-        jmp ?loop
-?title_load
-        jsr load_game_menu
-        cmp #0
-        bne ?tl_fail
+        adc #0                  ; +C: C = (sel >= 2)
+?pause  tax                     ; 1 SETTINGS, 2 SAVE, 3 LOAD, 4 CREDITS
+        dex
+        beq ?set
+        dex
+        beq ?save
+        dex
+        bne ?cred
+        jsr load_game_menu      ; A=0 ok / 1 fail, Z from A (both exits)
+        bne ?redraw
         lda #2
         sta menu_result
-        rts
-?tl_fail jsr redraw_both
-        jmp ?loop
-?not_2
-        ; 3 = LOAD (pause) or CREDITS (title)
-        cmp #3
-        bne ?not_3
-        lda menu_mode
-        beq ?title_credits      ; title mode: sel 3 = CREDITS
-        ; Pause: sel 3 = LOAD
-        jsr load_game_menu
-        cmp #0
-        bne ?pl_fail
-        lda #2
-        sta menu_result
-        rts
-?pl_fail jsr redraw_both
-        jmp ?loop
-?title_credits
-        jsr show_credits
-        jsr redraw_both
-        jmp ?loop
-?not_3
-        ; 4 = CREDITS (pause only)
-        jsr show_credits
-        jsr redraw_both
+        rts                     ; A=2: N=Z=0
+?set    jsr menu_settings
+        beq ?redraw             ; exits lda #0 / sta draw_mode: Z=1
+?cred   jsr show_credits
+        beq ?redraw             ; same exit: Z=1
+?save   jsr save_game_menu
+?redraw jsr redraw_both
         jmp ?loop
 .endp
 
@@ -274,20 +225,12 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         ; Wait for fire/key release first
 ?rel    lda TRIG0
         beq ?rel
-?loop   lda RTCLOK3
-?vs     cmp RTCLOK3
-        beq ?vs
+?loop   jsr menu_vsync
         ; ESC only
-        lda $02FC
+        lda CH
         cmp #$1C
         bne ?loop
-        lda #$FF
-        sta $02FC
-        ldx #SFX_SWTCHX
-        jsr snd_play
-        lda #0
-        sta draw_mode
-        rts
+        beq menu_settings.exit  ; Z=1: same exit as SETTINGS
 .endp
 
 ; ============================================
@@ -297,39 +240,24 @@ menu_mode   dta 0           ; 0=title screen, 1=pause (has SAVE)
         lda #1
         sta draw_mode
         jsr redraw_both
-?loop   lda RTCLOK3
-?vs     cmp RTCLOK3
-        beq ?vs
-        lda $02FC
+?loop   jsr menu_vsync
+        lda CH
         cmp #$0C
         bne ?chk_esc
         lda #$FF
-        sta $02FC
-        jsr toggle_sound
-        jsr redraw_both
-?chk_esc
-        lda $02FC
-        cmp #$1C
-        bne ?loop
-        lda #$FF
-        sta $02FC
-        ldx #SFX_SWTCHX
-        jsr snd_play
-        lda #0
-        sta draw_mode
-        rts
-.endp
-
-; ============================================
-; TOGGLE SOUND
-; ============================================
-.proc toggle_sound
-        lda snd_enabled
+        sta CH
+        lda snd_enabled         ; toggle sound
         eor #1
         sta snd_enabled
-        bne ?done
+        bne ?on
+        jsr sio_quiet           ; off: silence, the sample IRQ off
+?on     jsr redraw_both
+?chk_esc
+        lda CH
+        cmp #$1C
+        bne ?loop
+exit    jsr menu_esc_snd
         lda #0
-        sta snd_active
-        sta AUDC4
-?done   rts
+        sta draw_mode
+        rts                     ; Z=1 (menu_common_loop relies on it)
 .endp

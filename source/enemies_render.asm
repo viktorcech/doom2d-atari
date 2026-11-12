@@ -4,203 +4,109 @@
 ;==============================================
 
 ; ============================================
-; RENDER ALL ENEMIES
+; RENDER ALL ENEMIES - the frame of en_anim/en_afr at en_x + mf_ox, en_y +
+; mf_oy; facing left the type's _L frame or the right one mirrored
+; (TMonster.Draw). Corpses (en_act 3) show their last DIE/MESS frame.
 ; ============================================
 .proc render_enemies
+        ; The cheap reject's window (fable-skill-atari: pass 1): a frame is at
+        ; most 50 x 45 px, within 37 px of en_x / en_y (gen/mon_frames.asm), so
+        ; only en_x - (cam_x - 64) and en_y - (cam_y - 64) under 512 can show.
+        lda cam_x
+        sec
+        sbc #64
+        sta ?cxl+1
+        lda cam_x_hi
+        sbc #0
+        sta ?cxh+1
+        lda cam_y
+        sec
+        sbc #64
+        sta ?cyl+1
+        lda cam_y_hi
+        sbc #0
+        sta ?cyh+1
         ldx #0
+        beq ?lp                 ; (always) slot 0 is tested before the bound
+?nx2    ldx zzidx               ; (the loop's end up here: in reach of ?lp)
+?nx     inx
+        cpx num_en              ; only slots 0..num_en-1 can ever be active
+        bcc ?lp
+        rts
 ?lp     lda en_act,x
-        beq ?nx_jmp
-        cmp #3
-        beq ?nx_jmp             ; sleeping = don't render
+        beq ?nx
+        lda en_x,x              ; far off the window: no frame, no clip
+?cxl    cmp #0                  ; (patched: cam_x - 64; the cmp is the borrow)
+        lda enxhi,x
+?cxh    sbc #0
+        cmp #2
+        bcs ?nx
+        lda en_y,x
+?cyl    cmp #0                  ; (patched: cam_y - 64)
+        lda en_y_hi,x
+?cyh    sbc #0
+        cmp #2
+        bcs ?nx
         stx zzidx
-        jmp ?vis
-?nx_jmp jmp ?nx
-?vis
-        ; Screen position
-        lda en_x,x
+        lda en_type,x           ; Y = type*8 + anim (type < 32: the asl
+        asl                     ; shift out zeros, C=0 down to ?pos)
+        asl
+        asl
+        ora en_anim,x
+        tay
+        lda en_dir,x
+        bne ?left
+        sta bf_mir              ; A = 0: facing right, not mirrored
+        lda ma_r,y
+        adc en_afr,x
+        tay                     ; Y = frame
+        lda mf_ox,y
+        bcc ?pos                ; (always: C=0, see ?pos)
+?left   lda ma_flg,y            ; bit 7: left = the right frames mirrored
+        bmi ?mir
+        lda #0                  ; the type's own left frames
+        sta bf_mir
+        lda ma_l,y
+        adc en_afr,x
+        tay                     ; Y = frame
+        lda mf_ox,y
+        bcc ?pos                ; (always: C=0)
+?mir    lda #$FF
+        sta bf_mir
+        lda ma_l,y
+        adc en_afr,x
+        tay                     ; Y = frame
+        lda mf_oxm,y
+        ; zdxh:zdx / zdy_hi:zdy = en_x / en_y + signed offset: the sign is the
+        ; N of the offset's load (bcc keeps it), negative (most) falls through
+        ; (2026-10-30 6502-idioms.md "Flags are values you track")
+?pos    bpl ?xpos               ; C=0: a frame number + en_afr < 256
+        adc en_x,x
         sta zdx
         lda enxhi,x
-        sta zdxh
-        bpl ?xok
-        jmp ?nx2
-?xok    lda en_y,x
-        sec
-        sbc #32
-        bcs ?yok
-        jmp ?nx2
-?yok
+        adc #$FF                ; C from the low add
+?xh     sta zdxh
+        lda mf_oy,y
+        bpl ?ypos
+        clc
+        adc en_y,x
         sta zdy
-        ; Check if dying -> use death sprite
-        lda en_act,x
-        cmp #2
-        beq ?dying
-        jmp ?walkanim
-?dying
-        ; Death animation: select sprite by timer phase and gib flag
-        ; Gib: timer 20-10 = gib1, 9-1 = gib2 + blink
-        ; Normal: timer 20-14 = death1, 13-7 = death2, 6-1 = death3 + blink
-        lda en_gib,x
-        bne ?gib
-        ; --- Normal death ---
-        lda en_dtimer,x
-        cmp #14
-        bcs ?d_fr1
-        cmp #7
-        bcs ?d_fr2
-        ; Blink in last phase
-        lsr
-        bcs ?skip_draw
-        ; Frame 3: death3 from table (0 = fallback to death1)
-        jsr ?get_death3
-        jmp ?deathdraw
-?d_fr1  ; Frame 1: base death sprite (base_spr + 5)
-        jsr ?get_death1
-        jmp ?deathdraw
-?d_fr2  ; Frame 2: death2 from table (0 = fallback to death1)
-        jsr ?get_death2
-        jmp ?deathdraw
-?gib    ; --- Gib death ---
-        lda en_dtimer,x
-        cmp #10
-        bcs ?g_fr1
-        ; Blink in last phase
-        lsr
-        bcs ?skip_draw
-        ; Frame 2: gib2 from table
-        lda en_type,x
+        lda en_y_hi,x
+        adc #$FF
+?yh     sta zdy_hi
+        tya
         tax
-        lda en_gib2_spr,x
-        ldx zzidx
-        jmp ?deathdraw
-?g_fr1  ; Frame 1: gib1 from table
-        lda en_type,x
-        tax
-        lda en_gib1_spr,x
-        ldx zzidx
-?deathdraw
-        ; Mark dirty + draw WITHOUT mirror
-        pha
-        lda #16
-        sta md_w
-        lda #32
-        sta md_h
-        jsr mark_dirty_sprite
-        pla
-        jsr blit_sprite
+        jsr blit_frame
         jmp ?nx2
-?skip_draw
-        jmp ?nx2
-        ; --- Helper: get death sprite by type ---
-?get_death1
-        lda en_type,x
-        tax
-        lda en_base_spr,x
-        clc
-        adc #5
-        ldx zzidx
-        rts
-?get_death2
-        lda en_type,x
-        tax
-        lda en_death2_spr,x
-        beq ?gd2_fb         ; 0 = no death2, use death1
-        ldx zzidx
-        rts
-?gd2_fb ldx zzidx
-        jsr ?get_death1
-        rts
-?get_death3
-        lda en_type,x
-        tax
-        lda en_death3_spr,x
-        beq ?gd3_fb         ; 0 = no death3, use death1
-        ldx zzidx
-        rts
-?gd3_fb ldx zzidx
-        jsr ?get_death1
-        rts
-?walkanim
-        ; Calculate sprite index: base + walk frame
-        lda en_type,x
-        tax
-        lda en_base_spr,x
-        sta re_base
-        ldx zzidx
-        ; Check pain first
-        lda en_pain_tmr,x
-        beq ?no_epain
-        ; Show pain sprite
-        lda en_type,x
-        tay
-        lda en_pain_spr,y
-        beq ?no_epain          ; 0 = no pain sprite
-        ldy en_dir,x
-        beq ?epain_r
-        jmp ?dodraw_pain       ; dir=1 (left) = base variant
-?epain_r
-        clc
-        adc #1                 ; +1 = _L variant
-?dodraw_pain
-        pha
-        lda #16
-        sta md_w
-        lda #32
-        sta md_h
-        jsr mark_dirty_sprite
-        pla
-        jmp ?dopain
-?no_epain
-        ; Check if shooting (just fired: alerted + timer in shoot range)
-?chk_shoot
-        lda en_cooldown,x
-        beq ?walk              ; not alerted = no shoot sprite
-        lda en_atk,x
-        beq ?walk              ; en_atk == 0: ready to fire, show walk
-        cmp #15
-        bcs ?walk              ; en_atk >= 15: cooldown, show walk
-        lda re_base
-        clc
-        adc #4                 ; shoot = base + 4
-        jmp ?dodraw
-?walk   ; Walk animation: cycle through 3 walk frames in pattern 1,2,3,2
-        ; (zfr >> 3) & 3 gives values 0,1,2,3 cycling every 8 frames
-        ; When result is 3, remap to 1 → final pattern: 0,1,2,1
-        ; Then +1 to offset from base (walk sprites = base+1..base+3)
-        lda zfr
-        lsr
-        lsr
-        lsr                ; zfr / 8 = change frame every 8 game frames
-        and #$03           ; mod 4 = values 0,1,2,3
-        cmp #3
-        bne ?fok
-        lda #1             ; 3 → 1 (creates bounce: 0,1,2,1,0,1,2,1...)
-?fok    clc
-        adc #1             ; walk1=base+1, walk2=base+2, walk3=base+3
-        clc
-        adc re_base
-?dodraw ; Mark dirty tiles before drawing
-        pha
-        lda #16
-        sta md_w
-        lda #32
-        sta md_h
-        jsr mark_dirty_sprite
-        pla
-        ; Base sprites face LEFT, _L sprites face RIGHT
-        ; dir=0 (right) -> +mirror_offset[type], dir=1 (left) -> base
-        ldx zzidx
-        ldy en_dir,x
-        bne ?noflip
-        ldy en_type,x
-        clc
-        adc en_mirror_off,y
-?noflip
-?dopain jsr blit_sprite
-?nx2    ldx zzidx
-?nx     inx
-        cpx #MAX_ENEMIES
-        bcs ?ret
-        jmp ?lp
-?ret    rts
-re_base dta 0
+?xpos   adc en_x,x              ; offset >= 0 (out of line: 6502-cycles-layout.md
+        sta zdx                 ; "rare case out of line")
+        lda enxhi,x
+        adc #0
+        bcc ?xh                 ; (always: a map x high byte + a carry)
+?ypos   clc
+        adc en_y,x
+        sta zdy
+        lda en_y_hi,x
+        adc #0
+        bcc ?yh                 ; (always: a map y high byte + a carry)
 .endp

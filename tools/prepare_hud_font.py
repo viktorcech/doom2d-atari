@@ -2,8 +2,10 @@
 """
 Generate HUD font for DOOM 2D Atari VBXE.
 
-Output: data/hud_font.bin (768 bytes)
-  - 12 characters, each 8x8 = 64 bytes
+Output: data/hud_font.bin (44 glyphs x 64 B: 0-9, heart, bullet, A-Z, a block,
+  : . - / !)
+  - each glyph 8x8 = 64 bytes; 0-11 generated here, 12-38 kept from the
+    existing file, 39-43 (: . - / !) appended (EXTRA)
   - Index 0-9: digits '0'-'9'
   - Index 10: heart icon (HP)
   - Index 11: bullet icon (ammo)
@@ -172,18 +174,38 @@ def bitmap_to_raw(bitmap_rows, color):
     return raw
 
 
+# the level stats' punctuation (g_game.pas DrawSingleStat: "Time:", "Kills: x
+# / y", "Kills-per-minute: ##.#"): glyphs 39..42, after the font's 0..38
+# (digits, heart, bullet, A-Z, a block) that data/hud_font.bin already has
+EXTRA = [
+    [0, 0b00011000, 0b00011000, 0, 0, 0b00011000, 0b00011000, 0],   # ':'
+    [0, 0, 0, 0, 0, 0b00011000, 0b00011000, 0],                     # '.'
+    [0, 0, 0, 0b01111110, 0b01111110, 0, 0, 0],                     # '-'
+    [0b00000110, 0b00001100, 0b00011000, 0b00110000, 0b01100000, 0b11000000, 0, 0],  # '/'
+    [0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0, 0b00011000, 0],  # '!'
+]
+KEEP = 39                       # glyphs kept from the existing font
+
+
 def main():
     data = bytearray()
     for i in range(12):
         char_data = bitmap_to_raw(FONT_BITMAPS[i], COLORS[i])
         data.extend(char_data)
+    if os.path.exists(OUTPUT):  # letters and the block: from the font as it is
+        old = open(OUTPUT, 'rb').read()
+        if len(old) >= KEEP * 64:
+            data.extend(old[12 * 64:KEEP * 64])
+            letter = next(b for b in old[12 * 64:13 * 64] if b)    # the letters' colour
+            for g in EXTRA:
+                data.extend(bitmap_to_raw(g, letter))
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with open(OUTPUT, 'wb') as f:
         f.write(data)
 
     print(f"HUD font: {len(data)} bytes -> {OUTPUT}")
-    print(f"  12 characters (0-9, heart, bullet), each 8x8 = 64 bytes")
+    print(f"  {len(data) // 64} glyphs, each 8x8 = 64 bytes")
 
     # Print ASCII preview
     for i in range(12):
